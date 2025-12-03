@@ -284,33 +284,190 @@ class CIVProtocol:
         return response is not None and response.command == CIVResponse.OK
 
     def write_memory_channel(self, channel: MemoryChannel) -> bool:
-        """Write a memory channel to the radio"""
-        # Build memory data
-        data = bytearray()
+        """Write a memory channel to the radio using command 1A 00"""
+        if not self.serial:
+            return False
 
-        # Channel number (2-digit BCD)
-        ch_bcd = ((channel.number // 10) << 4) | (channel.number % 10)
-        data.append(ch_bcd)
+        # First, read the current memory content to get the full data structure
+        ch_high = 0x00
+        ch_low = ((channel.number // 10) << 4) | (channel.number % 10)
 
-        # Frequency (5 bytes BCD)
-        data.extend(freq_to_bcd(channel.rx_frequency))
+        # Read current memory content
+        read_cmd = bytes([
+            CIV_PREAMBLE, CIV_PREAMBLE,
+            self.config.civ_address,
+            self.config.controller_address,
+            0x1A, 0x00, ch_high, ch_low,
+            CIV_EOM
+        ])
 
-        # Mode and filter
-        data.append(channel.mode)
-        data.append(channel.filter_width)
+        self.serial.reset_input_buffer()
+        self.serial.write(read_cmd)
+        self.serial.flush()
+        time.sleep(0.15)
 
-        # Additional data flags
-        data.append(channel.duplex)
-        data.append(channel.tone_mode)
+        # Read response
+        buffer = bytearray()
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            if self.serial.in_waiting > 0:
+                buffer.extend(self.serial.read(self.serial.in_waiting))
+                if buffer.count(CIV_EOM) >= 2:
+                    break
+            time.sleep(0.01)
 
-        msg = CIVMessage(
-            destination=self.config.civ_address,
-            source=self.config.controller_address,
-            command=CIVCommand.MEMORY_WRITE,
-            data=bytes(data),
-        )
-        response = self.send_command(msg)
-        return response is not None and response.command == CIVResponse.OK
+        # Parse response to get current payload
+        first_fd = buffer.find(CIV_EOM)
+        if first_fd < 0 or first_fd + 1 >= len(buffer):
+            return False
+
+        response_part = buffer[first_fd + 1:]
+        current_payload = None
+
+        for i in range(len(response_part) - 6):
+            if (response_part[i] == CIV_PREAMBLE and
+                response_part[i+1] == CIV_PREAMBLE and
+                response_part[i+4] == 0x1A):
+                end_idx = response_part.find(CIV_EOM, i)
+                if end_idx > i:
+                    current_payload = bytearray(response_part[i+5:end_idx])
+                    break
+
+        if current_payload is None or len(current_payload) < 10:
+            return False
+
+        # Update the payload with new channel data
+        # Payload structure (42 bytes):
+        # 00: sub-command (0x00)
+        # 01-02: channel number (2 bytes BCD) - keep as is
+        # 03: split/select
+        # 04-08: RX frequency (5 bytes BCD)
+        # 09-10: RX mode and filter
+        # ... other data ...
+        # 32-41: memory name (10 characters ASCII)
+
+        # Update frequency at offset 4 (after sub-cmd, channel, split)
+        freq_bcd = freq_to_bcd(channel.rx_frequency)
+        current_payload[4:9] = freq_bcd
+
+        # Update mode and filter at offset 9
+        current_payload[9] = channel.mode
+        current_payload[10] = channel.filter_width
+
+        # Update name (last 10 bytes)
+        name_padded = (channel.name or "")[:10].ljust(10)
+        name_bytes = name_padded.encode("ascii")
+        current_payload[-10:] = name_bytes
+
+        # Write back the modified payload
+        write_cmd = bytes([
+            CIV_PREAMBLE, CIV_PREAMBLE,
+            self.config.civ_address,
+            self.config.controller_address,
+            0x1A,
+        ]) + bytes(current_payload) + bytes([CIV_EOM])
+
+        self.serial.reset_input_buffer()
+        self.serial.write(write_cmd)
+        self.serial.flush()
+        time.sleep(0.1)
+
+        # Read response
+        buffer = bytearray()
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            if self.serial.in_waiting > 0:
+                buffer.extend(self.serial.read(self.serial.in_waiting))
+                if buffer.count(CIV_EOM) >= 2:
+                    break
+            time.sleep(0.01)
+
+        # Check for OK response (FB)
+        return b'\xfb' in buffer
+
+    def _write_memory_name(self, channel_num: int, name: str) -> bool:
+        """Write memory channel name by reading current data and updating name field"""
+        if not self.serial:
+            return False
+
+        # First, read the current memory content to get the full data structure
+        ch_high = 0x00
+        ch_low = ((channel_num // 10) << 4) | (channel_num % 10)
+
+        # Read current memory content
+        read_cmd = bytes([
+            CIV_PREAMBLE, CIV_PREAMBLE,
+            self.config.civ_address,
+            self.config.controller_address,
+            0x1A, 0x00, ch_high, ch_low,
+            CIV_EOM
+        ])
+
+        self.serial.reset_input_buffer()
+        self.serial.write(read_cmd)
+        self.serial.flush()
+        time.sleep(0.15)
+
+        # Read response
+        buffer = bytearray()
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            if self.serial.in_waiting > 0:
+                buffer.extend(self.serial.read(self.serial.in_waiting))
+                if buffer.count(CIV_EOM) >= 2:
+                    break
+            time.sleep(0.01)
+
+        # Parse response to get current payload
+        first_fd = buffer.find(CIV_EOM)
+        if first_fd < 0 or first_fd + 1 >= len(buffer):
+            return False
+
+        response_part = buffer[first_fd + 1:]
+        current_payload = None
+
+        for i in range(len(response_part) - 6):
+            if (response_part[i] == CIV_PREAMBLE and
+                response_part[i+1] == CIV_PREAMBLE and
+                response_part[i+4] == 0x1A):
+                end_idx = response_part.find(CIV_EOM, i)
+                if end_idx > i:
+                    current_payload = bytearray(response_part[i+5:end_idx])
+                    break
+
+        if current_payload is None or len(current_payload) < 10:
+            return False
+
+        # Update the name (last 10 bytes of payload)
+        name_padded = name[:10].ljust(10)
+        name_bytes = name_padded.encode("ascii")
+        current_payload[-10:] = name_bytes
+
+        # Write back the modified payload
+        write_cmd = bytes([
+            CIV_PREAMBLE, CIV_PREAMBLE,
+            self.config.civ_address,
+            self.config.controller_address,
+            0x1A,
+        ]) + bytes(current_payload) + bytes([CIV_EOM])
+
+        self.serial.reset_input_buffer()
+        self.serial.write(write_cmd)
+        self.serial.flush()
+        time.sleep(0.1)
+
+        # Read response
+        buffer = bytearray()
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            if self.serial.in_waiting > 0:
+                buffer.extend(self.serial.read(self.serial.in_waiting))
+                if buffer.count(CIV_EOM) >= 2:
+                    break
+            time.sleep(0.01)
+
+        # Check for OK response (FB)
+        return b'\xfb' in buffer
 
     def clear_memory_channel(self, channel: int) -> bool:
         """Clear/erase a memory channel"""
