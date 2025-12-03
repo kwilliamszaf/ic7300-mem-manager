@@ -365,21 +365,10 @@ class CIVProtocol:
 
         mode, filter_width = mode_result
 
-        # Read memory name using command 0x1A, sub-command 0x00
+        # Note: IC-7300 does not support reading memory names via CI-V protocol.
+        # Names can only be accessed via SD card export or RS-BA1 software.
+        # Users can manually enter names in the UI after downloading.
         name = ""
-        name_msg = CIVMessage(
-            destination=self.config.civ_address,
-            source=self.config.controller_address,
-            command=0x1A,
-            sub_command=0x00,
-        )
-        name_response = self.send_command(name_msg)
-        if name_response and len(name_response.data) > 0:
-            # Name is ASCII encoded
-            try:
-                name = name_response.data.decode("ascii").strip("\x00").strip()
-            except UnicodeDecodeError:
-                name = ""
 
         return MemoryChannel(
             number=channel,
