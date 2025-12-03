@@ -2,6 +2,20 @@
 
 A memory manager for the ICOM IC-7300 amateur radio.
 
+## Prerequisites
+
+### Install uv (Python package manager)
+
+**Windows (PowerShell):**
+```powershell
+irm https://astral.sh/uv/install.ps1 | iex
+```
+
+**macOS/Linux:**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
 ## Installation
 
 ```bash
