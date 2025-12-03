@@ -4,6 +4,7 @@ Modern web interface for managing IC-7300 memories
 """
 
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +26,8 @@ app = Flask(__name__)
 # Global state
 manager: Optional[MemoryManager] = None
 is_connected: bool = False
+radio_lock = threading.Lock()
+operation_in_progress: Optional[str] = None
 
 
 def get_manager() -> MemoryManager:
@@ -137,11 +140,13 @@ def index():
 @app.route("/api/status")
 def get_status():
     """Get current connection status."""
-    global is_connected, manager
+    global is_connected, manager, operation_in_progress
     return jsonify({
         "connected": is_connected,
         "port": manager.config.port if manager else "COM3",
         "baud": manager.config.baud_rate if manager else 115200,
+        "busy": operation_in_progress is not None,
+        "operation": operation_in_progress,
     })
 
 
@@ -210,34 +215,58 @@ def save_channels():
 @app.route("/api/download", methods=["POST"])
 def download_from_radio():
     """Download all channels from the radio."""
-    global manager, is_connected
+    global manager, is_connected, operation_in_progress
 
     if not is_connected or manager is None:
         return jsonify({"success": False, "message": "Not connected to radio"})
 
-    count = manager.download_all_channels(1, 99)
-    return jsonify({
-        "success": True,
-        "count": count,
-        "message": f"Downloaded {count} channels from radio",
-    })
+    # Try to acquire the lock (non-blocking)
+    if not radio_lock.acquire(blocking=False):
+        return jsonify({
+            "success": False,
+            "message": f"Radio busy: {operation_in_progress or 'operation'} in progress",
+        })
+
+    try:
+        operation_in_progress = "download"
+        count = manager.download_all_channels(1, 99)
+        return jsonify({
+            "success": True,
+            "count": count,
+            "message": f"Downloaded {count} channels from radio",
+        })
+    finally:
+        operation_in_progress = None
+        radio_lock.release()
 
 
 @app.route("/api/upload", methods=["POST"])
 def upload_to_radio():
     """Upload all channels to the radio."""
-    global manager, is_connected
+    global manager, is_connected, operation_in_progress
 
     if not is_connected or manager is None:
         return jsonify({"success": False, "message": "Not connected to radio"})
 
-    success, failed = manager.upload_all_channels()
-    return jsonify({
-        "success": True,
-        "uploaded": success,
-        "failed": failed,
-        "message": f"Uploaded {success} channels, {failed} failed",
-    })
+    # Try to acquire the lock (non-blocking)
+    if not radio_lock.acquire(blocking=False):
+        return jsonify({
+            "success": False,
+            "message": f"Radio busy: {operation_in_progress or 'operation'} in progress",
+        })
+
+    try:
+        operation_in_progress = "upload"
+        success, failed = manager.upload_all_channels()
+        return jsonify({
+            "success": True,
+            "uploaded": success,
+            "failed": failed,
+            "message": f"Uploaded {success} channels, {failed} failed",
+        })
+    finally:
+        operation_in_progress = None
+        radio_lock.release()
 
 
 @app.route("/api/export/csv")
