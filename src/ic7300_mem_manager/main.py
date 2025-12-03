@@ -16,6 +16,28 @@ from .models import (
     format_frequency,
 )
 
+# Default data file for auto-save/load
+DEFAULT_DATA_FILE = Path.home() / ".ic7300_channels.json"
+
+
+def auto_load(manager: MemoryManager) -> bool:
+    """Load channels from default data file if it exists."""
+    if DEFAULT_DATA_FILE.exists():
+        try:
+            success, _ = manager.import_from_json(DEFAULT_DATA_FILE)
+            return success > 0
+        except Exception:
+            return False
+    return False
+
+
+def auto_save(manager: MemoryManager) -> bool:
+    """Save channels to default data file."""
+    try:
+        return manager.export_to_json(DEFAULT_DATA_FILE)
+    except Exception:
+        return False
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create command line argument parser"""
@@ -164,6 +186,11 @@ def cmd_import(manager: MemoryManager, args: argparse.Namespace) -> int:
         return 1
 
     print(f"Imported {success} channels successfully, {failed} failed.")
+
+    # Auto-save after import
+    if success > 0:
+        auto_save(manager)
+
     return 0 if failed == 0 else 1
 
 
@@ -226,6 +253,8 @@ def cmd_download(manager: MemoryManager, args: argparse.Namespace) -> int:
                     f"Downloaded channel {args.channel}: "
                     f"{format_frequency(channel.rx_frequency)} {channel.mode.name}"
                 )
+                # Auto-save after single channel download
+                auto_save(manager)
                 return 0
             else:
                 print(f"Failed to download channel {args.channel} (may be empty)")
@@ -233,6 +262,9 @@ def cmd_download(manager: MemoryManager, args: argparse.Namespace) -> int:
         else:
             count = manager.download_all_channels(args.start, args.end, progress)
             print(f"\nDownloaded {count} channels from radio.")
+            # Auto-save after batch download
+            if count > 0:
+                auto_save(manager)
             return 0
     finally:
         manager.disconnect()
@@ -264,6 +296,10 @@ def cmd_set(manager: MemoryManager, args: argparse.Namespace) -> int:
 
     manager.set_channel(channel)
     print(f"Set channel {args.channel}: {format_frequency(frequency)} {args.mode}")
+
+    # Auto-save after setting channel
+    auto_save(manager)
+
     return 0
 
 
@@ -271,6 +307,8 @@ def cmd_clear(manager: MemoryManager, args: argparse.Namespace) -> int:
     """Clear a memory channel"""
     if manager.clear_channel(args.channel):
         print(f"Cleared channel {args.channel}")
+        # Auto-save after clearing channel
+        auto_save(manager)
         return 0
     else:
         print(f"Error: Invalid channel number: {args.channel}")
@@ -316,6 +354,9 @@ def main() -> int:
         civ_address=args.address,
     )
     manager = MemoryManager(config)
+
+    # Auto-load saved channels from previous session
+    auto_load(manager)
 
     # Dispatch command
     commands = {
