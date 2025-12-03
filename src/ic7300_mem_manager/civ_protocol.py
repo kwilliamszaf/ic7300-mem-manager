@@ -365,10 +365,85 @@ class CIVProtocol:
 
         mode, filter_width = mode_result
 
-        # Note: IC-7300 does not support reading memory names via CI-V protocol.
-        # Names can only be accessed via SD card export or RS-BA1 software.
-        # Users can manually enter names in the UI after downloading.
+        # Read memory name using command 1A 00 with 2-byte BCD channel number
+        # Format: 1A 00 <high_bcd> <low_bcd> where channel 1 = 00 01
         name = ""
+
+        # Channel number as 2-byte BCD (00 01 to 00 99)
+        ch_high = 0x00  # Always 0 for channels 0-99
+        ch_low = ((channel // 10) << 4) | (channel % 10)
+
+        # Build command: FE FE <to> <from> 1A 00 <ch_high> <ch_low> FD
+        raw_cmd = bytes([
+            CIV_PREAMBLE, CIV_PREAMBLE,
+            self.config.civ_address,
+            self.config.controller_address,
+            0x1A, 0x00, ch_high, ch_low,
+            CIV_EOM
+        ])
+
+        if self.serial:
+            self.serial.reset_input_buffer()
+            self.serial.write(raw_cmd)
+            self.serial.flush()
+            time.sleep(0.15)
+
+            # Read response
+            buffer = bytearray()
+            start_time = time.time()
+            while time.time() - start_time < 1.0:
+                if self.serial.in_waiting > 0:
+                    buffer.extend(self.serial.read(self.serial.in_waiting))
+                    if buffer.count(CIV_EOM) >= 2:
+                        break
+                time.sleep(0.01)
+
+            if channel == 1:
+                print(f"DEBUG ch{channel} raw ({len(buffer)} bytes): {buffer.hex(' ')}")
+
+            # Find the response (skip echo)
+            first_fd = buffer.find(CIV_EOM)
+            if first_fd >= 0 and first_fd + 1 < len(buffer):
+                response_part = buffer[first_fd + 1:]
+
+                for i in range(len(response_part) - 6):
+                    if (response_part[i] == CIV_PREAMBLE and
+                        response_part[i+1] == CIV_PREAMBLE):
+                        cmd_byte = response_part[i+4]
+                        end_idx = response_part.find(CIV_EOM, i)
+
+                        # Check for error response (FA = NG)
+                        if cmd_byte == 0xFA:
+                            if channel == 1:
+                                print(f"DEBUG ch{channel}: Radio returned NG (error)")
+                            break
+
+                        # Check for valid 1A response
+                        if cmd_byte == 0x1A and end_idx > i:
+                            payload = response_part[i+5:end_idx]
+                            if channel == 1:
+                                print(f"DEBUG ch{channel} payload ({len(payload)} bytes): {bytes(payload).hex(' ')}")
+
+                            # Payload structure after 1A 00 (42 bytes total):
+                            # 00: sub-command (0x00)
+                            # 01-02: channel number (2 bytes BCD)
+                            # 03-31: frequency, mode, tone data (~29 bytes)
+                            # 32-41: memory name (10 characters ASCII)
+                            #
+                            # The name is the last 10 bytes of the payload
+
+                            if len(payload) >= 10:
+                                # Name is the last 10 bytes
+                                name_bytes = payload[-10:]
+                                if channel == 1:
+                                    print(f"DEBUG ch{channel} name_bytes ({len(name_bytes)}): {bytes(name_bytes).hex(' ')}")
+                                try:
+                                    name = bytes(name_bytes).decode("ascii").strip("\x00").strip()
+                                    if channel == 1:
+                                        print(f"DEBUG ch{channel} name: '{name}'")
+                                except (UnicodeDecodeError, ValueError):
+                                    name = ""
+                        break
 
         return MemoryChannel(
             number=channel,
