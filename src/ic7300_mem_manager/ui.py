@@ -223,18 +223,17 @@ def create_ui() -> gr.Blocks:
 
         def on_connect(manager, connected, port, baud, address):
             """Handle connect/disconnect."""
-            if manager is None:
-                manager = init_manager(port, baud, address)
-
             if not connected:
-                # Connect
+                # Always create a new manager with current settings when connecting
+                manager = init_manager(port, baud, address)
                 if manager.connect():
                     return manager, True, "Connected to " + port, gr.update(value="Disconnect")
                 else:
                     return manager, False, "Failed to connect to " + port, gr.update(value="Connect")
             else:
                 # Disconnect
-                manager.disconnect()
+                if manager:
+                    manager.disconnect()
                 return manager, False, "Disconnected", gr.update(value="Connect")
 
         def on_download(manager, connected):
