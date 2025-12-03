@@ -38,9 +38,10 @@ ic7300-mem upload
 uv run python -m ic7300_mem_manager.ui
 ```
 
+Then open http://127.0.0.1:5000 in your browser.
+
 ## Requirements
 
 - Python 3.10+
 - pyserial
-- gradio
-- pandas
+- flask

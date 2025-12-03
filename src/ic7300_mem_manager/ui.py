@@ -1,38 +1,51 @@
 """
-IC-7300 Memory Manager - Gradio UI
-Web interface for managing IC-7300 memories
+IC-7300 Memory Manager - Flask Web UI
+Modern web interface for managing IC-7300 memories
 """
 
 import tempfile
 from pathlib import Path
 from typing import Optional
 
-import gradio as gr
-import pandas as pd
+from flask import Flask, jsonify, render_template, request, send_file
 
 from .memory_manager import MemoryManager
 from .models import (
     FREQUENCY_BANDS,
     DuplexMode,
     FilterWidth,
-    MemoryChannel,
     OperatingMode,
     RadioConfig,
     ToneMode,
     get_band_for_frequency,
 )
 
+app = Flask(__name__)
 
-def channels_to_dataframe(
-    manager: MemoryManager,
+# Global state
+manager: Optional[MemoryManager] = None
+is_connected: bool = False
+
+
+def get_manager() -> MemoryManager:
+    """Get or create the memory manager instance."""
+    global manager
+    if manager is None:
+        manager = MemoryManager(RadioConfig(port="COM3", baud_rate=115200))
+    return manager
+
+
+def channels_to_list(
+    mgr: MemoryManager,
     band_filter: str = "All",
     show_empty: bool = True,
-) -> pd.DataFrame:
-    """Convert memory channels to a pandas DataFrame for display."""
+) -> list[dict]:
+    """Convert memory channels to a list of dicts for JSON response."""
     rows = []
     for ch_num in range(100):
-        channel = manager.channels.get(ch_num)
+        channel = mgr.channels.get(ch_num)
         if channel is None:
+            from .models import MemoryChannel
             channel = MemoryChannel(number=ch_num)
 
         # Apply band filter
@@ -46,43 +59,47 @@ def channels_to_dataframe(
             continue
 
         rows.append({
-            "Ch": ch_num,
-            "Name": channel.name if not channel.is_empty else "",
-            "RX Freq (MHz)": channel.rx_frequency / 1_000_000 if not channel.is_empty else 0.0,
-            "TX Freq (MHz)": channel.tx_frequency / 1_000_000 if not channel.is_empty else 0.0,
-            "Mode": channel.mode.name if not channel.is_empty else "",
-            "Filter": channel.filter_width.name if not channel.is_empty else "",
-            "Duplex": channel.duplex.name if not channel.is_empty else "",
-            "Tone": channel.tone_mode.name if not channel.is_empty else "",
+            "ch": ch_num,
+            "name": channel.name if not channel.is_empty else "",
+            "rx_freq": channel.rx_frequency / 1_000_000 if not channel.is_empty else 0.0,
+            "tx_freq": channel.tx_frequency / 1_000_000 if not channel.is_empty else 0.0,
+            "mode": channel.mode.name if not channel.is_empty else "",
+            "filter": channel.filter_width.name if not channel.is_empty else "",
+            "duplex": channel.duplex.name if not channel.is_empty else "",
+            "tone": channel.tone_mode.name if not channel.is_empty else "",
+            "is_empty": channel.is_empty,
         })
 
-    return pd.DataFrame(rows)
+    return rows
 
 
-def dataframe_to_channels(df: pd.DataFrame, manager: MemoryManager) -> int:
-    """Parse edited DataFrame back to MemoryChannel objects. Returns count updated."""
+def list_to_channels(channels_data: list[dict], mgr: MemoryManager) -> int:
+    """Parse channel list back to MemoryChannel objects. Returns count updated."""
+    from .models import MemoryChannel
+
     updated = 0
-    for _, row in df.iterrows():
-        ch_num = int(row["Ch"])
-        rx_freq = row["RX Freq (MHz)"]
-        name = str(row["Name"]).strip() if pd.notna(row["Name"]) else ""
-        mode_str = str(row["Mode"]).strip() if pd.notna(row["Mode"]) else ""
+    for row in channels_data:
+        ch_num = int(row["ch"])
+        rx_freq = float(row.get("rx_freq", 0))
+        name = str(row.get("name", "")).strip()
+        mode_str = str(row.get("mode", "")).strip()
 
         # Skip empty rows (no frequency or mode)
         if rx_freq == 0.0 or not mode_str:
-            manager.channels[ch_num] = MemoryChannel(number=ch_num)
+            mgr.channels[ch_num] = MemoryChannel(number=ch_num)
             continue
 
         try:
-            tx_freq = row["TX Freq (MHz)"] if row["TX Freq (MHz)"] > 0 else rx_freq
+            tx_freq = float(row.get("tx_freq", rx_freq)) if row.get("tx_freq", 0) > 0 else rx_freq
             mode = OperatingMode[mode_str] if mode_str else OperatingMode.USB
-            filter_str = str(row["Filter"]).strip() if pd.notna(row["Filter"]) else "FIL1"
+            filter_str = str(row.get("filter", "FIL1")).strip()
             filter_width = FilterWidth[filter_str] if filter_str else FilterWidth.FIL1
-            duplex_str = str(row["Duplex"]).strip() if pd.notna(row["Duplex"]) else "SIMPLEX"
+            duplex_str = str(row.get("duplex", "SIMPLEX")).strip()
             duplex = DuplexMode[duplex_str] if duplex_str else DuplexMode.SIMPLEX
-            tone_str = str(row["Tone"]).strip() if pd.notna(row["Tone"]) else "OFF"
+            tone_str = str(row.get("tone", "OFF")).strip()
             tone_mode = ToneMode[tone_str] if tone_str else ToneMode.OFF
 
+            from .models import MemoryChannel
             channel = MemoryChannel(
                 number=ch_num,
                 name=name[:10],
@@ -94,7 +111,7 @@ def dataframe_to_channels(df: pd.DataFrame, manager: MemoryManager) -> int:
                 tone_mode=tone_mode,
                 is_empty=False,
             )
-            manager.channels[ch_num] = channel
+            mgr.channels[ch_num] = channel
             updated += 1
         except (KeyError, ValueError) as e:
             print(f"Error parsing channel {ch_num}: {e}")
@@ -102,291 +119,215 @@ def dataframe_to_channels(df: pd.DataFrame, manager: MemoryManager) -> int:
     return updated
 
 
-def get_summary_text(manager: MemoryManager) -> str:
-    """Generate summary statistics text."""
-    summary = manager.summary()
-    lines = [
-        f"**Used:** {summary['used_channels']} / {summary['total_channels']} channels",
-        "",
-    ]
+# Routes
 
-    if summary["channels_by_band"]:
-        lines.append("**By Band:**")
-        for band, count in sorted(summary["channels_by_band"].items()):
-            lines.append(f"  {band}: {count}")
+@app.route("/")
+def index():
+    """Serve the main HTML page."""
+    return render_template(
+        "index.html",
+        bands=["All"] + list(FREQUENCY_BANDS.keys()),
+        modes=[m.name for m in OperatingMode],
+        filters=[f.name for f in FilterWidth],
+        duplex_modes=[d.name for d in DuplexMode],
+        tone_modes=[t.name for t in ToneMode],
+    )
 
-    return "\n".join(lines)
+
+@app.route("/api/status")
+def get_status():
+    """Get current connection status."""
+    global is_connected, manager
+    return jsonify({
+        "connected": is_connected,
+        "port": manager.config.port if manager else "COM3",
+        "baud": manager.config.baud_rate if manager else 115200,
+    })
 
 
-def create_ui() -> gr.Blocks:
-    """Create the Gradio interface."""
+@app.route("/api/connect", methods=["POST"])
+def connect():
+    """Connect to the radio."""
+    global manager, is_connected
 
-    # Band options for filter
-    band_options = ["All"] + list(FREQUENCY_BANDS.keys())
+    data = request.get_json() or {}
+    port = data.get("port", "COM3")
+    baud = int(data.get("baud", 115200))
+    address = data.get("address", "0x94")
 
-    # Mode options for reference
-    mode_options = [m.name for m in OperatingMode]
-    filter_options = [f.name for f in FilterWidth]
-    duplex_options = [d.name for d in DuplexMode]
-    tone_options = [t.name for t in ToneMode]
+    try:
+        civ_addr = int(address, 0) if address.startswith("0x") else int(address)
+    except ValueError:
+        civ_addr = 0x94
 
-    with gr.Blocks(title="IC-7300 Memory Manager") as app:
-        # State
-        manager_state = gr.State(None)
-        connected_state = gr.State(False)
+    config = RadioConfig(port=port, baud_rate=baud, civ_address=civ_addr)
+    manager = MemoryManager(config)
 
-        gr.Markdown("# IC-7300 Memory Manager")
+    if manager.connect():
+        is_connected = True
+        return jsonify({"success": True, "message": f"Connected to {port}"})
+    else:
+        is_connected = False
+        return jsonify({"success": False, "message": f"Failed to connect to {port}"})
 
-        # Section 1: Connection
-        with gr.Row():
-            port_input = gr.Textbox(label="Serial Port", value="COM3", scale=1)
-            baud_dropdown = gr.Dropdown(
-                label="Baud Rate",
-                choices=["9600", "19200", "38400", "57600", "115200"],
-                value="115200",
-                scale=1,
-            )
-            address_input = gr.Textbox(label="CI-V Address", value="0x94", scale=1)
-            connect_btn = gr.Button("Connect", variant="primary", scale=1)
-            connection_status = gr.Textbox(label="Status", value="Disconnected", interactive=False, scale=2)
 
-        # Section 2: Radio Operations
-        with gr.Row():
-            download_btn = gr.Button("Download All from Radio", variant="secondary")
-            upload_btn = gr.Button("Upload All to Radio", variant="secondary")
+@app.route("/api/disconnect", methods=["POST"])
+def disconnect():
+    """Disconnect from the radio."""
+    global manager, is_connected
 
-        operation_status = gr.Textbox(label="Operation Status", value="", interactive=False)
+    if manager:
+        manager.disconnect()
+    is_connected = False
+    return jsonify({"success": True, "message": "Disconnected"})
 
-        gr.Markdown("---")
 
-        # Section 3: Memory Table
-        gr.Markdown("## Memory Channels")
+@app.route("/api/channels")
+def get_channels():
+    """Get all memory channels."""
+    mgr = get_manager()
+    band = request.args.get("band", "All")
+    show_empty = request.args.get("show_empty", "true").lower() == "true"
 
-        with gr.Row():
-            band_filter = gr.Dropdown(
-                label="Filter by Band",
-                choices=band_options,
-                value="All",
-                scale=1,
-            )
-            show_empty = gr.Checkbox(label="Show Empty Channels", value=True, scale=1)
-            refresh_btn = gr.Button("Refresh Table", scale=1)
+    channels = channels_to_list(mgr, band, show_empty)
+    return jsonify({"channels": channels})
 
-        channel_table = gr.Dataframe(
-            headers=["Ch", "Name", "RX Freq (MHz)", "TX Freq (MHz)", "Mode", "Filter", "Duplex", "Tone"],
-            datatype=["number", "str", "number", "number", "str", "str", "str", "str"],
-            col_count=(8, "fixed"),
-            interactive=True,
-            wrap=True,
-        )
 
-        with gr.Row():
-            save_btn = gr.Button("Save Changes", variant="primary")
-            save_status = gr.Textbox(label="", value="", interactive=False, show_label=False)
+@app.route("/api/channels", methods=["POST"])
+def save_channels():
+    """Save edited channels."""
+    global manager
+    mgr = get_manager()
 
-        gr.Markdown(f"**Valid Modes:** {', '.join(mode_options)}")
-        gr.Markdown(f"**Valid Filters:** {', '.join(filter_options)} | **Duplex:** {', '.join(duplex_options)} | **Tone:** {', '.join(tone_options)}")
+    data = request.get_json() or {}
+    channels_data = data.get("channels", [])
 
-        gr.Markdown("---")
+    count = list_to_channels(channels_data, mgr)
+    manager = mgr
+    return jsonify({"success": True, "count": count, "message": f"Saved {count} channels"})
 
-        # Section 4: Import/Export
-        gr.Markdown("## Import / Export")
 
-        with gr.Row():
-            export_csv_btn = gr.Button("Export CSV")
-            export_json_btn = gr.Button("Export JSON")
-            csv_download = gr.File(label="Download CSV", interactive=False)
-            json_download = gr.File(label="Download JSON", interactive=False)
+@app.route("/api/download", methods=["POST"])
+def download_from_radio():
+    """Download all channels from the radio."""
+    global manager, is_connected
 
-        with gr.Row():
-            import_file = gr.File(label="Import File (CSV or JSON)", file_types=[".csv", ".json"])
-            import_status = gr.Textbox(label="Import Status", value="", interactive=False)
+    if not is_connected or manager is None:
+        return jsonify({"success": False, "message": "Not connected to radio"})
 
-        gr.Markdown("---")
-        summary_display = gr.Markdown("**Summary:** No data loaded")
+    count = manager.download_all_channels(1, 99)
+    return jsonify({
+        "success": True,
+        "count": count,
+        "message": f"Downloaded {count} channels from radio",
+    })
 
-        # ============ Event Handlers ============
 
-        def init_manager(port: str, baud: str, address: str):
-            """Initialize the MemoryManager."""
-            try:
-                civ_addr = int(address, 0) if address.startswith("0x") else int(address)
-            except ValueError:
-                civ_addr = 0x94
+@app.route("/api/upload", methods=["POST"])
+def upload_to_radio():
+    """Upload all channels to the radio."""
+    global manager, is_connected
 
-            config = RadioConfig(
-                port=port,
-                baud_rate=int(baud),
-                civ_address=civ_addr,
-            )
-            return MemoryManager(config)
+    if not is_connected or manager is None:
+        return jsonify({"success": False, "message": "Not connected to radio"})
 
-        def on_connect(manager, connected, port, baud, address):
-            """Handle connect/disconnect."""
-            if not connected:
-                # Always create a new manager with current settings when connecting
-                manager = init_manager(port, baud, address)
-                if manager.connect():
-                    return manager, True, "Connected to " + port, gr.update(value="Disconnect")
-                else:
-                    return manager, False, "Failed to connect to " + port, gr.update(value="Connect")
-            else:
-                # Disconnect
-                if manager:
-                    manager.disconnect()
-                return manager, False, "Disconnected", gr.update(value="Connect")
+    success, failed = manager.upload_all_channels()
+    return jsonify({
+        "success": True,
+        "uploaded": success,
+        "failed": failed,
+        "message": f"Uploaded {success} channels, {failed} failed",
+    })
 
-        def on_download(manager, connected):
-            """Download all channels from radio."""
-            if manager is None:
-                return None, "No manager initialized", gr.update(), gr.update()
-            if not connected:
-                return manager, "Not connected to radio", gr.update(), gr.update()
 
-            count = manager.download_all_channels(1, 99)
-            df = channels_to_dataframe(manager)
-            summary = get_summary_text(manager)
-            return manager, f"Downloaded {count} channels from radio", df, summary
+@app.route("/api/export/csv")
+def export_csv():
+    """Export channels as CSV file."""
+    mgr = get_manager()
 
-        def on_upload(manager, connected):
-            """Upload all channels to radio."""
-            if manager is None:
-                return "No manager initialized"
-            if not connected:
-                return "Not connected to radio"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        filepath = Path(f.name)
 
-            success, failed = manager.upload_all_channels()
-            return f"Uploaded {success} channels, {failed} failed"
+    mgr.export_to_csv(filepath)
 
-        def on_refresh(manager, band, show):
-            """Refresh the table display."""
-            if manager is None:
-                manager = MemoryManager(RadioConfig(port="COM3", baud_rate=115200))
-            df = channels_to_dataframe(manager, band, show)
-            summary = get_summary_text(manager)
-            return manager, df, summary
+    return send_file(
+        filepath,
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="ic7300_channels.csv",
+    )
 
-        def on_save(manager, df):
-            """Save changes from table to manager."""
-            if manager is None:
-                manager = MemoryManager(RadioConfig(port="COM3", baud_rate=115200))
-            count = dataframe_to_channels(df, manager)
-            summary = get_summary_text(manager)
-            return manager, f"Saved {count} channels", summary
 
-        def on_export_csv(manager):
-            """Export to CSV file."""
-            if manager is None:
-                return None
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-                filepath = Path(f.name)
-            manager.export_to_csv(filepath)
-            return str(filepath)
+@app.route("/api/export/json")
+def export_json():
+    """Export channels as JSON file."""
+    mgr = get_manager()
 
-        def on_export_json(manager):
-            """Export to JSON file."""
-            if manager is None:
-                return None
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-                filepath = Path(f.name)
-            manager.export_to_json(filepath)
-            return str(filepath)
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        filepath = Path(f.name)
 
-        def on_import(manager, file):
-            """Import from CSV or JSON file."""
-            if file is None:
-                return manager, "No file selected", gr.update(), ""
+    mgr.export_to_json(filepath)
 
-            if manager is None:
-                manager = MemoryManager(RadioConfig(port="COM3", baud_rate=115200))
+    return send_file(
+        filepath,
+        mimetype="application/json",
+        as_attachment=True,
+        download_name="ic7300_channels.json",
+    )
 
-            filepath = Path(file.name)
-            if filepath.suffix.lower() == ".csv":
-                success, failed = manager.import_from_csv(filepath)
-            elif filepath.suffix.lower() == ".json":
-                success, failed = manager.import_from_json(filepath)
-            else:
-                return manager, "Unsupported file format", gr.update(), ""
 
-            df = channels_to_dataframe(manager)
-            summary = get_summary_text(manager)
-            return manager, f"Imported {success} channels, {failed} failed", df, summary
+@app.route("/api/import", methods=["POST"])
+def import_file():
+    """Import channels from uploaded file."""
+    global manager
 
-        # Wire up events
-        connect_btn.click(
-            on_connect,
-            inputs=[manager_state, connected_state, port_input, baud_dropdown, address_input],
-            outputs=[manager_state, connected_state, connection_status, connect_btn],
-        )
+    if "file" not in request.files:
+        return jsonify({"success": False, "message": "No file provided"})
 
-        download_btn.click(
-            on_download,
-            inputs=[manager_state, connected_state],
-            outputs=[manager_state, operation_status, channel_table, summary_display],
-        )
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"success": False, "message": "No file selected"})
 
-        upload_btn.click(
-            on_upload,
-            inputs=[manager_state, connected_state],
-            outputs=[operation_status],
-        )
+    mgr = get_manager()
 
-        refresh_btn.click(
-            on_refresh,
-            inputs=[manager_state, band_filter, show_empty],
-            outputs=[manager_state, channel_table, summary_display],
-        )
+    # Save to temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as f:
+        file.save(f.name)
+        filepath = Path(f.name)
 
-        band_filter.change(
-            on_refresh,
-            inputs=[manager_state, band_filter, show_empty],
-            outputs=[manager_state, channel_table, summary_display],
-        )
+    if filepath.suffix.lower() == ".csv":
+        success, failed = mgr.import_from_csv(filepath)
+    elif filepath.suffix.lower() == ".json":
+        success, failed = mgr.import_from_json(filepath)
+    else:
+        return jsonify({"success": False, "message": "Unsupported file format"})
 
-        show_empty.change(
-            on_refresh,
-            inputs=[manager_state, band_filter, show_empty],
-            outputs=[manager_state, channel_table, summary_display],
-        )
+    manager = mgr
 
-        save_btn.click(
-            on_save,
-            inputs=[manager_state, channel_table],
-            outputs=[manager_state, save_status, summary_display],
-        )
+    # Clean up temp file
+    filepath.unlink(missing_ok=True)
 
-        export_csv_btn.click(
-            on_export_csv,
-            inputs=[manager_state],
-            outputs=[csv_download],
-        )
+    return jsonify({
+        "success": True,
+        "imported": success,
+        "failed": failed,
+        "message": f"Imported {success} channels, {failed} failed",
+    })
 
-        export_json_btn.click(
-            on_export_json,
-            inputs=[manager_state],
-            outputs=[json_download],
-        )
 
-        import_file.change(
-            on_import,
-            inputs=[manager_state, import_file],
-            outputs=[manager_state, import_status, channel_table, summary_display],
-        )
-
-        # Initialize on load
-        app.load(
-            on_refresh,
-            inputs=[manager_state, band_filter, show_empty],
-            outputs=[manager_state, channel_table, summary_display],
-        )
-
-    return app
+@app.route("/api/summary")
+def get_summary():
+    """Get memory summary statistics."""
+    mgr = get_manager()
+    summary = mgr.summary()
+    return jsonify(summary)
 
 
 def launch():
-    """Launch the Gradio interface."""
-    app = create_ui()
-    app.launch(share=True)
+    """Launch the Flask web interface."""
+    print("Starting IC-7300 Memory Manager...")
+    print("Open http://127.0.0.1:5000 in your browser")
+    app.run(host="127.0.0.1", port=5000, debug=False)
 
 
 if __name__ == "__main__":

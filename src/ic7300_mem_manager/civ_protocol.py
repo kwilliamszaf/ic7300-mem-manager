@@ -110,20 +110,27 @@ class CIVMessage:
 
 
 def freq_to_bcd(frequency: int) -> bytes:
-    """Convert frequency in Hz to BCD format (5 bytes, LSB first)"""
-    # IC-7300 uses 10Hz resolution, so divide by 10
-    freq_10hz = frequency // 10
+    """Convert frequency in Hz to BCD format (5 bytes, LSB first).
+
+    IC-7300 uses 1Hz resolution for frequency data.
+    Example: 7.200.000 Hz = 0x00 0x00 0x20 0x07 0x00
+    """
+    freq = frequency
     bcd = []
     for _ in range(5):
-        bcd.append((freq_10hz % 10) | ((freq_10hz // 10 % 10) << 4))
-        freq_10hz //= 100
+        bcd.append((freq % 10) | ((freq // 10 % 10) << 4))
+        freq //= 100
     return bytes(bcd)
 
 
 def bcd_to_freq(bcd_data: bytes) -> int:
-    """Convert BCD format to frequency in Hz"""
+    """Convert BCD format to frequency in Hz.
+
+    IC-7300 sends frequency as 5 bytes BCD, LSB first, in 1Hz resolution.
+    Example: 7.200.000 Hz = 0x00 0x00 0x20 0x07 0x00
+    """
     frequency = 0
-    multiplier = 10  # Start at 10Hz
+    multiplier = 1  # Start at 1Hz
     for byte in bcd_data:
         low_nibble = byte & 0x0F
         high_nibble = (byte >> 4) & 0x0F

@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IC-7300 Memory Manager</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-card: #1f2940;
+            --accent: #4f8cff;
+            --accent-hover: #6ba0ff;
+            --success: #4ade80;
+            --error: #f87171;
+            --warning: #fbbf24;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border: #334155;
+            --input-bg: #0f172a;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+
+        header h1 {
+            font-size: 1.75rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--error);
+            box-shadow: 0 0 8px var(--error);
+            transition: all 0.3s ease;
+        }
+
+        .status-indicator.connected {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+
+        .status-text {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .card h2 {
+            font-size: 1rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Form Elements */
+        .form-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input, select {
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: var(--text-primary);
+            font-size: 0.9375rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.2);
+        }
+
+        input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-card);
+            border-color: var(--accent);
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: #0f172a;
+        }
+
+        .btn-success:hover {
+            filter: brightness(1.1);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Operations Row */
+        .operations-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .operation-status {
+            flex: 1;
+            padding: 10px 16px;
+            background: var(--input-bg);
+            border-radius: 8px;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            min-width: 200px;
+        }
+
+        /* Table Section */
+        .table-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-size: 0.9375rem;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent);
+        }
+
+        /* Data Table */
+        .table-wrapper {
+            overflow-x: auto;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+
+        th {
+            background: var(--bg-secondary);
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 0.75rem;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+        }
+
+        td {
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        tr:hover {
+            background: rgba(79, 140, 255, 0.05);
+        }
+
+        tr.empty-row {
+            color: var(--text-secondary);
+        }
+
+        tr.empty-row:hover {
+            background: rgba(79, 140, 255, 0.03);
+        }
+
+        /* Editable cells */
+        td input, td select {
+            width: 100%;
+            padding: 6px 8px;
+            font-size: 0.875rem;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 4px;
+        }
+
+        td input:hover, td select:hover {
+            border-color: var(--border);
+        }
+
+        td input:focus, td select:focus {
+            background: var(--input-bg);
+            border-color: var(--accent);
+        }
+
+        .freq-input {
+            font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+            text-align: right;
+        }
+
+        .ch-number {
+            font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        /* Import/Export */
+        .import-export-row {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .file-drop-zone {
+            flex: 1;
+            min-width: 250px;
+            padding: 24px;
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            text-align: center;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .file-drop-zone:hover, .file-drop-zone.dragover {
+            border-color: var(--accent);
+            background: rgba(79, 140, 255, 0.05);
+        }
+
+        .file-drop-zone input {
+            display: none;
+        }
+
+        /* Summary */
+        .summary {
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+            font-size: 0.9375rem;
+        }
+
+        .summary-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .summary-item strong {
+            color: var(--accent);
+        }
+
+        .summary-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border);
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .toast {
+            padding: 14px 20px;
+            border-radius: 8px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            animation: slideIn 0.3s ease;
+            max-width: 350px;
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--error);
+        }
+
+        .toast.info {
+            border-left: 4px solid var(--accent);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--text-secondary);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 12px;
+            }
+
+            header h1 {
+                font-size: 1.25rem;
+            }
+
+            .form-row {
+                flex-direction: column;
+            }
+
+            .form-group {
+                width: 100%;
+            }
+
+            .table-wrapper {
+                font-size: 0.8125rem;
+            }
+
+            td, th {
+                padding: 8px 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                IC-7300 Memory Manager
+            </h1>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <span class="status-text" id="statusText">Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Connection Card -->
+        <div class="card">
+            <h2>Connection</h2>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="port">Serial Port</label>
+                    <input type="text" id="port" value="COM3" placeholder="COM3 or /dev/ttyUSB0" style="width: 150px;">
+                </div>
+                <div class="form-group">
+                    <label for="baud">Baud Rate</label>
+                    <select id="baud" style="width: 120px;">
+                        <option value="9600">9600</option>
+                        <option value="19200">19200</option>
+                        <option value="38400">38400</option>
+                        <option value="57600">57600</option>
+                        <option value="115200" selected>115200</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="address">CI-V Address</label>
+                    <input type="text" id="address" value="0x94" style="width: 80px;">
+                </div>
+                <button class="btn btn-primary" id="connectBtn" onclick="toggleConnection()">Connect</button>
+            </div>
+        </div>
+
+        <!-- Operations Card -->
+        <div class="card">
+            <h2>Radio Operations</h2>
+            <div class="operations-row">
+                <button class="btn btn-secondary" id="downloadBtn" onclick="downloadChannels()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Download All
+                </button>
+                <button class="btn btn-secondary" id="uploadBtn" onclick="uploadChannels()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    Upload All
+                </button>
+                <div class="operation-status" id="operationStatus">Ready</div>
+            </div>
+        </div>
+
+        <!-- Memory Channels Card -->
+        <div class="card">
+            <h2>Memory Channels</h2>
+            <div class="table-controls">
+                <div class="filter-group">
+                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px;">
+                        <label for="bandFilter" style="margin: 0;">Band:</label>
+                        <select id="bandFilter" onchange="refreshTable()" style="width: 100px;">
+                            {% for band in bands %}
+                            <option value="{{ band }}">{{ band }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="showEmpty" checked onchange="refreshTable()">
+                        Show Empty Channels
+                    </label>
+                </div>
+                <button class="btn btn-success" onclick="saveChannels()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                    </svg>
+                    Save Changes
+                </button>
+            </div>
+            <div class="table-wrapper" style="max-height: 500px; overflow-y: auto;">
+                <table id="channelTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;">Ch</th>
+                            <th style="width: 120px;">Name</th>
+                            <th style="width: 130px;">RX Freq (MHz)</th>
+                            <th style="width: 130px;">TX Freq (MHz)</th>
+                            <th style="width: 80px;">Mode</th>
+                            <th style="width: 70px;">Filter</th>
+                            <th style="width: 90px;">Duplex</th>
+                            <th style="width: 70px;">Tone</th>
+                        </tr>
+                    </thead>
+                    <tbody id="channelTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Import/Export Card -->
+        <div class="card">
+            <h2>Import / Export</h2>
+            <div class="import-export-row">
+                <button class="btn btn-secondary" onclick="exportCSV()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    Export CSV
+                </button>
+                <button class="btn btn-secondary" onclick="exportJSON()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    Export JSON
+                </button>
+                <div class="file-drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                    <input type="file" id="fileInput" accept=".csv,.json" onchange="importFile(this.files[0])">
+                    <p>Drop CSV or JSON file here, or click to browse</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Card -->
+        <div class="card">
+            <h2>Summary</h2>
+            <div class="summary" id="summary">
+                <div class="summary-item">
+                    <span>Used:</span>
+                    <strong id="usedChannels">0</strong>
+                    <span>/ 100 channels</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        // State
+        let channels = [];
+        let isConnected = false;
+
+        // Mode options from server
+        const modes = {{ modes | tojson }};
+        const filters = {{ filters | tojson }};
+        const duplexModes = {{ duplex_modes | tojson }};
+        const toneModes = {{ tone_modes | tojson }};
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshTable();
+            updateSummary();
+            setupDropZone();
+        });
+
+        // Toast notifications
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4000);
+        }
+
+        // API helpers
+        async function apiCall(url, options = {}) {
+            try {
+                const response = await fetch(url, {
+                    headers: { 'Content-Type': 'application/json' },
+                    ...options
+                });
+                return await response.json();
+            } catch (error) {
+                showToast('Network error: ' + error.message, 'error');
+                throw error;
+            }
+        }
+
+        // Connection
+        async function toggleConnection() {
+            const btn = document.getElementById('connectBtn');
+            btn.disabled = true;
+
+            if (!isConnected) {
+                const port = document.getElementById('port').value;
+                const baud = document.getElementById('baud').value;
+                const address = document.getElementById('address').value;
+
+                const result = await apiCall('/api/connect', {
+                    method: 'POST',
+                    body: JSON.stringify({ port, baud, address })
+                });
+
+                if (result.success) {
+                    isConnected = true;
+                    updateConnectionUI(true);
+                    showToast(result.message, 'success');
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } else {
+                await apiCall('/api/disconnect', { method: 'POST' });
+                isConnected = false;
+                updateConnectionUI(false);
+                showToast('Disconnected', 'info');
+            }
+
+            btn.disabled = false;
+        }
+
+        function updateConnectionUI(connected) {
+            const indicator = document.getElementById('statusIndicator');
+            const text = document.getElementById('statusText');
+            const btn = document.getElementById('connectBtn');
+
+            if (connected) {
+                indicator.classList.add('connected');
+                text.textContent = 'Connected';
+                btn.textContent = 'Disconnect';
+            } else {
+                indicator.classList.remove('connected');
+                text.textContent = 'Disconnected';
+                btn.textContent = 'Connect';
+            }
+        }
+
+        // Download/Upload
+        async function downloadChannels() {
+            if (!isConnected) {
+                showToast('Not connected to radio', 'error');
+                return;
+            }
+
+            const status = document.getElementById('operationStatus');
+            status.innerHTML = '<span class="spinner"></span> Downloading...';
+
+            const result = await apiCall('/api/download', { method: 'POST' });
+
+            if (result.success) {
+                showToast(result.message, 'success');
+                await refreshTable();
+            } else {
+                showToast(result.message, 'error');
+            }
+
+            status.textContent = 'Ready';
+        }
+
+        async function uploadChannels() {
+            if (!isConnected) {
+                showToast('Not connected to radio', 'error');
+                return;
+            }
+
+            const status = document.getElementById('operationStatus');
+            status.innerHTML = '<span class="spinner"></span> Uploading...';
+
+            const result = await apiCall('/api/upload', { method: 'POST' });
+
+            if (result.success) {
+                showToast(result.message, 'success');
+            } else {
+                showToast(result.message, 'error');
+            }
+
+            status.textContent = 'Ready';
+        }
+
+        // Table management
+        async function refreshTable() {
+            const band = document.getElementById('bandFilter').value;
+            const showEmpty = document.getElementById('showEmpty').checked;
+
+            const result = await apiCall(`/api/channels?band=${band}&show_empty=${showEmpty}`);
+            channels = result.channels;
+            renderTable();
+            updateSummary();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('channelTableBody');
+            tbody.innerHTML = '';
+
+            channels.forEach((ch, index) => {
+                const row = document.createElement('tr');
+                if (ch.is_empty) row.classList.add('empty-row');
+
+                row.innerHTML = `
+                    <td class="ch-number">${ch.ch}</td>
+                    <td><input type="text" value="${ch.name}" maxlength="10" data-index="${index}" data-field="name"></td>
+                    <td><input type="text" class="freq-input" value="${ch.rx_freq > 0 ? ch.rx_freq.toFixed(6) : ''}" data-index="${index}" data-field="rx_freq"></td>
+                    <td><input type="text" class="freq-input" value="${ch.tx_freq > 0 ? ch.tx_freq.toFixed(6) : ''}" data-index="${index}" data-field="tx_freq"></td>
+                    <td>
+                        <select data-index="${index}" data-field="mode">
+                            <option value=""></option>
+                            ${modes.map(m => `<option value="${m}" ${ch.mode === m ? 'selected' : ''}>${m}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td>
+                        <select data-index="${index}" data-field="filter">
+                            <option value=""></option>
+                            ${filters.map(f => `<option value="${f}" ${ch.filter === f ? 'selected' : ''}>${f}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td>
+                        <select data-index="${index}" data-field="duplex">
+                            <option value=""></option>
+                            ${duplexModes.map(d => `<option value="${d}" ${ch.duplex === d ? 'selected' : ''}>${d}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td>
+                        <select data-index="${index}" data-field="tone">
+                            <option value=""></option>
+                            ${toneModes.map(t => `<option value="${t}" ${ch.tone === t ? 'selected' : ''}>${t}</option>`).join('')}
+                        </select>
+                    </td>
+                `;
+
+                // Add change listeners
+                row.querySelectorAll('input, select').forEach(el => {
+                    el.addEventListener('change', handleCellChange);
+                });
+
+                tbody.appendChild(row);
+            });
+        }
+
+        function handleCellChange(e) {
+            const index = parseInt(e.target.dataset.index);
+            const field = e.target.dataset.field;
+            let value = e.target.value;
+
+            if (field === 'rx_freq' || field === 'tx_freq') {
+                value = parseFloat(value) || 0;
+            }
+
+            channels[index][field] = value;
+            channels[index].is_empty = !channels[index].rx_freq && !channels[index].mode;
+        }
+
+        async function saveChannels() {
+            const result = await apiCall('/api/channels', {
+                method: 'POST',
+                body: JSON.stringify({ channels })
+            });
+
+            if (result.success) {
+                showToast(result.message, 'success');
+                await updateSummary();
+            } else {
+                showToast('Failed to save changes', 'error');
+            }
+        }
+
+        // Summary
+        async function updateSummary() {
+            const result = await apiCall('/api/summary');
+            const summary = document.getElementById('summary');
+
+            let bandHtml = '';
+            if (result.channels_by_band) {
+                const bands = Object.entries(result.channels_by_band)
+                    .map(([band, count]) => `<strong>${band}:</strong> ${count}`)
+                    .join(' <span class="summary-divider"></span> ');
+                bandHtml = `<span class="summary-divider"></span> ${bands}`;
+            }
+
+            summary.innerHTML = `
+                <div class="summary-item">
+                    <span>Used:</span>
+                    <strong>${result.used_channels}</strong>
+                    <span>/ ${result.total_channels} channels</span>
+                </div>
+                ${bandHtml}
+            `;
+        }
+
+        // Import/Export
+        function exportCSV() {
+            window.location.href = '/api/export/csv';
+        }
+
+        function exportJSON() {
+            window.location.href = '/api/export/json';
+        }
+
+        function setupDropZone() {
+            const dropZone = document.getElementById('dropZone');
+
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('dragover');
+            });
+
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('dragover');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file) importFile(file);
+            });
+        }
+
+        async function importFile(file) {
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/import', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(result.message, 'success');
+                    await refreshTable();
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } catch (error) {
+                showToast('Import failed: ' + error.message, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

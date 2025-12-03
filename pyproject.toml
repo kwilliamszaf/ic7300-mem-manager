@@ -21,8 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "pyserial>=3.5",
-    "gradio>=4.0",
-    "pandas>=2.0",
+    "flask>=3.0",
 ]
 
 [project.optional-dependencies]
