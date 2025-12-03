@@ -240,9 +240,9 @@ def create_ui() -> gr.Blocks:
         def on_download(manager, connected):
             """Download all channels from radio."""
             if manager is None:
-                return None, "No manager initialized", gr.update()
+                return None, "No manager initialized", gr.update(), gr.update()
             if not connected:
-                return manager, "Not connected to radio", gr.update()
+                return manager, "Not connected to radio", gr.update(), gr.update()
 
             count = manager.download_all_channels(1, 99)
             df = channels_to_dataframe(manager)
