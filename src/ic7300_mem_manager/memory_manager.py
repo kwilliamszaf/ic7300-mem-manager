@@ -665,8 +665,9 @@ class MemoryManager:
     def import_from_csv(self, filepath: Path) -> tuple[int, int]:
         """Import channels from CSV file. Returns (success_count, fail_count)
 
-        Note: CSV import clears existing channels first and creates groups
-        from unique group names found in the data.
+        Note: CSV import clears existing channels and groups first, then creates
+        groups from unique group names found in the data. The base_channel for
+        each group is set to the minimum channel number in that group.
         """
         success = 0
         failed = 0
@@ -674,6 +675,9 @@ class MemoryManager:
             # Clear existing channels
             for i in range(self.MAX_CHANNELS + 1):
                 self.channels[i] = MemoryChannel(number=i)
+
+            # Clear existing groups
+            self.groups.clear()
 
             # Track unique groups found in CSV
             found_groups: set[str] = set()
@@ -709,16 +713,18 @@ class MemoryManager:
                         print(f"Failed to parse row: {e}")
                         failed += 1
 
-            # Create groups that don't already exist
+            # Create groups with base_channel set to minimum channel number in each group
             for group_name in found_groups:
-                if group_name and group_name not in self.groups:
-                    # Find base channel from first channel in this group
-                    for ch in self.channels.values():
-                        if not ch.is_empty and ch.group == group_name:
-                            self.groups[group_name] = MemoryGroup(
-                                id=group_name, base_channel=ch.number
-                            )
-                            break
+                if group_name:
+                    # Find minimum channel number for this group
+                    min_channel = min(
+                        (ch.number for ch in self.channels.values()
+                         if not ch.is_empty and ch.group == group_name),
+                        default=1
+                    )
+                    self.groups[group_name] = MemoryGroup(
+                        id=group_name, base_channel=min_channel
+                    )
 
         except IOError as e:
             print(f"Failed to import CSV: {e}")
