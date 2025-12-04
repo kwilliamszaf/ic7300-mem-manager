@@ -24,11 +24,13 @@ from .models import (
 class CIVCommand(IntEnum):
     """CI-V command codes"""
     # Transceive commands
-    SET_FREQUENCY = 0x00
-    SET_MODE = 0x01
+    SEND_FREQUENCY = 0x00     # Send frequency data (transceive)
+    SEND_MODE = 0x01          # Send mode data (transceive)
     READ_BAND_EDGE = 0x02
     READ_FREQUENCY = 0x03
     READ_MODE = 0x04
+    SET_FREQUENCY = 0x05      # Set operating frequency
+    SET_MODE = 0x06           # Set operating mode
     SET_VFO = 0x07
     SELECT_MEMORY = 0x08
     MEMORY_WRITE = 0x09
@@ -190,10 +192,9 @@ class CIVProtocol:
         self.serial.write(cmd_bytes)
         self.serial.flush()
 
-        # Wait for response
-        time.sleep(0.05)
-        response = self._read_response()
-        return response
+        # Wait for response - give more time for the radio to respond
+        time.sleep(0.1)
+        return self._read_response()
 
     def _read_response(self) -> Optional[CIVMessage]:
         """Read and parse CI-V response"""
@@ -283,107 +284,68 @@ class CIVProtocol:
         response = self.send_command(msg)
         return response is not None and response.command == CIVResponse.OK
 
+    def switch_to_vfo(self) -> bool:
+        """Switch the radio to VFO mode (command 0x07 0x00)."""
+        msg = CIVMessage(
+            destination=self.config.civ_address,
+            source=self.config.controller_address,
+            command=CIVCommand.SET_VFO,
+            data=bytes([0x00]),  # 0x00 = select VFO A
+        )
+        response = self.send_command(msg)
+        return response is not None and response.command == CIVResponse.OK
+
     def write_memory_channel(self, channel: MemoryChannel) -> bool:
-        """Write a memory channel to the radio using command 1A 00"""
+        """Write a memory channel to the radio.
+
+        Uses the IC-7300's memory write approach (verified working sequence):
+        1. Switch to VFO mode
+        2. Set frequency in VFO (command 0x05)
+        3. Set mode in VFO (command 0x06)
+        4. Select memory channel (command 0x08)
+        5. Write VFO to selected memory (command 0x09 with NO data)
+        6. Write the name via command 0x1A 0x00
+        """
         if not self.serial:
             return False
 
-        # First, read the current memory content to get the full data structure
-        ch_high = 0x00
-        ch_low = ((channel.number // 10) << 4) | (channel.number % 10)
-
-        # Read current memory content
-        read_cmd = bytes([
-            CIV_PREAMBLE, CIV_PREAMBLE,
-            self.config.civ_address,
-            self.config.controller_address,
-            0x1A, 0x00, ch_high, ch_low,
-            CIV_EOM
-        ])
-
-        self.serial.reset_input_buffer()
-        self.serial.write(read_cmd)
-        self.serial.flush()
-        time.sleep(0.15)
-
-        # Read response
-        buffer = bytearray()
-        start_time = time.time()
-        while time.time() - start_time < 1.0:
-            if self.serial.in_waiting > 0:
-                buffer.extend(self.serial.read(self.serial.in_waiting))
-                if buffer.count(CIV_EOM) >= 2:
-                    break
-            time.sleep(0.01)
-
-        # Parse response to get current payload
-        first_fd = buffer.find(CIV_EOM)
-        if first_fd < 0 or first_fd + 1 >= len(buffer):
+        # Step 1: Switch to VFO mode
+        if not self.switch_to_vfo():
             return False
+        time.sleep(0.2)
 
-        response_part = buffer[first_fd + 1:]
-        current_payload = None
-
-        for i in range(len(response_part) - 6):
-            if (response_part[i] == CIV_PREAMBLE and
-                response_part[i+1] == CIV_PREAMBLE and
-                response_part[i+4] == 0x1A):
-                end_idx = response_part.find(CIV_EOM, i)
-                if end_idx > i:
-                    current_payload = bytearray(response_part[i+5:end_idx])
-                    break
-
-        if current_payload is None or len(current_payload) < 10:
+        # Step 2: Set the RX frequency (in VFO) using command 0x05
+        if not self.set_frequency(channel.rx_frequency):
             return False
+        time.sleep(0.2)
 
-        # Update the payload with new channel data
-        # Payload structure (42 bytes):
-        # 00: sub-command (0x00)
-        # 01-02: channel number (2 bytes BCD) - keep as is
-        # 03: split/select
-        # 04-08: RX frequency (5 bytes BCD)
-        # 09-10: RX mode and filter
-        # ... other data ...
-        # 32-41: memory name (10 characters ASCII)
+        # Step 3: Set the mode (in VFO) using command 0x06
+        if not self.set_mode(channel.mode, channel.filter_width):
+            return False
+        time.sleep(0.2)
 
-        # Update frequency at offset 4 (after sub-cmd, channel, split)
-        freq_bcd = freq_to_bcd(channel.rx_frequency)
-        current_payload[4:9] = freq_bcd
+        # Step 4: Select the memory channel (command 0x08)
+        if not self.select_memory_channel(channel.number):
+            return False
+        time.sleep(0.2)
 
-        # Update mode and filter at offset 9
-        current_payload[9] = channel.mode
-        current_payload[10] = channel.filter_width
-
-        # Update name (last 10 bytes)
-        name_padded = (channel.name or "")[:10].ljust(10)
-        name_bytes = name_padded.encode("ascii")
-        current_payload[-10:] = name_bytes
-
-        # Write back the modified payload
-        write_cmd = bytes([
-            CIV_PREAMBLE, CIV_PREAMBLE,
-            self.config.civ_address,
-            self.config.controller_address,
-            0x1A,
-        ]) + bytes(current_payload) + bytes([CIV_EOM])
-
-        self.serial.reset_input_buffer()
-        self.serial.write(write_cmd)
-        self.serial.flush()
+        # Step 5: Write VFO to memory using command 0x09 (NO data - writes to selected channel)
+        msg = CIVMessage(
+            destination=self.config.civ_address,
+            source=self.config.controller_address,
+            command=CIVCommand.MEMORY_WRITE,
+            # No data - writes current VFO to the previously selected memory channel
+        )
+        response = self.send_command(msg)
+        if response is None or response.command != CIVResponse.OK:
+            return False
         time.sleep(0.1)
 
-        # Read response
-        buffer = bytearray()
-        start_time = time.time()
-        while time.time() - start_time < 1.0:
-            if self.serial.in_waiting > 0:
-                buffer.extend(self.serial.read(self.serial.in_waiting))
-                if buffer.count(CIV_EOM) >= 2:
-                    break
-            time.sleep(0.01)
+        # Step 6: Write the channel name using command 0x1A 0x00
+        if channel.name:
+            self._write_memory_name(channel.number, channel.name)
 
-        # Check for OK response (FB)
-        return b'\xfb' in buffer
+        return True
 
     def _write_memory_name(self, channel_num: int, name: str) -> bool:
         """Write memory channel name by reading current data and updating name field"""
@@ -470,13 +432,26 @@ class CIVProtocol:
         return b'\xfb' in buffer
 
     def clear_memory_channel(self, channel: int) -> bool:
-        """Clear/erase a memory channel"""
-        ch_bcd = ((channel // 10) << 4) | (channel % 10)
+        """Clear/erase a memory channel.
+
+        The IC-7300 requires selecting the memory channel first,
+        then issuing the memory clear command.
+        """
+        if not self.serial:
+            return False
+
+        # First, select the memory channel
+        if not self.select_memory_channel(channel):
+            return False
+
+        # Small delay after selection
+        time.sleep(0.05)
+
+        # Now send the clear command (0x0B) - no data needed after selection
         msg = CIVMessage(
             destination=self.config.civ_address,
             source=self.config.controller_address,
             command=CIVCommand.MEMORY_CLEAR,
-            data=bytes([ch_bcd]),
         )
         response = self.send_command(msg)
         return response is not None and response.command == CIVResponse.OK
@@ -555,9 +530,6 @@ class CIVProtocol:
                         break
                 time.sleep(0.01)
 
-            if channel == 1:
-                print(f"DEBUG ch{channel} raw ({len(buffer)} bytes): {buffer.hex(' ')}")
-
             # Find the response (skip echo)
             first_fd = buffer.find(CIV_EOM)
             if first_fd >= 0 and first_fd + 1 < len(buffer):
@@ -571,15 +543,11 @@ class CIVProtocol:
 
                         # Check for error response (FA = NG)
                         if cmd_byte == 0xFA:
-                            if channel == 1:
-                                print(f"DEBUG ch{channel}: Radio returned NG (error)")
                             break
 
                         # Check for valid 1A response
                         if cmd_byte == 0x1A and end_idx > i:
                             payload = response_part[i+5:end_idx]
-                            if channel == 1:
-                                print(f"DEBUG ch{channel} payload ({len(payload)} bytes): {bytes(payload).hex(' ')}")
 
                             # Payload structure after 1A 00 (42 bytes total):
                             # 00: sub-command (0x00)
@@ -592,12 +560,8 @@ class CIVProtocol:
                             if len(payload) >= 10:
                                 # Name is the last 10 bytes
                                 name_bytes = payload[-10:]
-                                if channel == 1:
-                                    print(f"DEBUG ch{channel} name_bytes ({len(name_bytes)}): {bytes(name_bytes).hex(' ')}")
                                 try:
                                     name = bytes(name_bytes).decode("ascii").strip("\x00").strip()
-                                    if channel == 1:
-                                        print(f"DEBUG ch{channel} name: '{name}'")
                                 except (UnicodeDecodeError, ValueError):
                                     name = ""
                         break

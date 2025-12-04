@@ -116,6 +116,20 @@ class MemoryChannel:
     tuning_step: int = 100
     """Tuning step in Hz"""
 
+    group: str = ""
+    """Memory group assignment (user-defined group ID)"""
+
+
+@dataclass
+class MemoryGroup:
+    """Memory group for organizing channels with sequential slot assignment"""
+
+    id: str
+    """Group identifier (user-defined, e.g., 'Contest', 'Repeaters')"""
+
+    base_channel: int = 1
+    """Starting memory slot for this group (0-99)"""
+
 
 @dataclass
 class MemoryBank:

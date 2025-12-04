@@ -5,6 +5,7 @@ High-level memory management operations
 
 import csv
 import json
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -14,6 +15,7 @@ from .models import (
     FilterWidth,
     MemoryBank,
     MemoryChannel,
+    MemoryGroup,
     OperatingMode,
     RadioConfig,
     ToneMode,
@@ -31,6 +33,7 @@ class MemoryManager:
         self.protocol = CIVProtocol(self.config)
         self.channels: dict[int, MemoryChannel] = {}
         self.banks: dict[str, MemoryBank] = {}
+        self.groups: dict[str, MemoryGroup] = {}
 
         # Initialize empty channels
         for i in range(self.MAX_CHANNELS + 1):
@@ -81,15 +84,149 @@ class MemoryManager:
         return False
 
     def upload_all_channels(self) -> tuple[int, int]:
-        """Upload all non-empty channels to the radio. Returns (success_count, fail_count)"""
+        """Upload all non-empty channels to the radio with group-aware slot assignment.
+
+        - First clears ALL memory channels (1-99) on the radio
+        - Grouped channels are written sequentially from their group's base_channel
+        - Ungrouped channels are written at next multiple of 10 after last group
+
+        Returns (success_count, fail_count)
+        """
+        # Validate no overlaps first
+        valid, error = self.validate_no_overlaps()
+        if not valid:
+            print(f"Upload aborted: {error}")
+            return 0, 0
+
+        # Clear ALL memory channels (1-99) first
+        print("Clearing all memory channels...")
+        for slot in range(1, 100):
+            self.protocol.clear_memory_channel(slot)
+            if slot % 10 == 0:
+                print(f"  Cleared slots 1-{slot}...")
+            time.sleep(0.05)  # Small delay between clear operations
+
+        # Switch back to VFO mode after clearing (important for first write to work)
+        print("Switching to VFO mode...")
+        self.protocol.switch_to_vfo()
+        time.sleep(0.5)  # Give radio time to settle
+
         success = 0
         failed = 0
-        for channel in self.channels.values():
-            if not channel.is_empty:
-                if self.protocol.write_memory_channel(channel):
+
+        # Write each group's channels first
+        print(f"Writing grouped channels... (groups: {list(self.groups.keys())})")
+        for group_id, group in self.groups.items():
+            group_channels = sorted(
+                self.get_channels_by_group(group_id), key=lambda ch: ch.number
+            )
+            print(f"  Group '{group_id}': {len(group_channels)} channels starting at slot {group.base_channel}")
+            for idx, channel in enumerate(group_channels):
+                target_slot = group.base_channel + idx
+                # Create a copy with the target slot number
+                ch_copy = MemoryChannel(
+                    number=target_slot,
+                    name=channel.name,
+                    rx_frequency=channel.rx_frequency,
+                    tx_frequency=channel.tx_frequency,
+                    mode=channel.mode,
+                    filter_width=channel.filter_width,
+                    duplex=channel.duplex,
+                    tone_mode=channel.tone_mode,
+                    tone_frequency=channel.tone_frequency,
+                    dtcs_code=channel.dtcs_code,
+                    tuning_step=channel.tuning_step,
+                    is_empty=False,
+                    group=channel.group,
+                )
+                result = self.protocol.write_memory_channel(ch_copy)
+                print(f"    Slot {target_slot}: '{channel.name}' -> {'OK' if result else 'FAIL'}")
+                if result:
                     success += 1
                 else:
                     failed += 1
+                time.sleep(0.05)  # Small delay between write operations
+
+        # Write ungrouped channels at next multiple of 10 after last group
+        ungrouped = sorted(self.get_ungrouped_channels(), key=lambda ch: ch.number)
+        ungrouped_base = self._get_ungrouped_base()
+
+        if ungrouped:
+            print(f"Writing ungrouped channels: {len(ungrouped)} channels starting at slot {ungrouped_base}")
+
+        for idx, channel in enumerate(ungrouped):
+            target_slot = ungrouped_base + idx
+            # Create a copy with the target slot number
+            ch_copy = MemoryChannel(
+                number=target_slot,
+                name=channel.name,
+                rx_frequency=channel.rx_frequency,
+                tx_frequency=channel.tx_frequency,
+                mode=channel.mode,
+                filter_width=channel.filter_width,
+                duplex=channel.duplex,
+                tone_mode=channel.tone_mode,
+                tone_frequency=channel.tone_frequency,
+                dtcs_code=channel.dtcs_code,
+                tuning_step=channel.tuning_step,
+                is_empty=False,
+                group=channel.group,
+            )
+            result = self.protocol.write_memory_channel(ch_copy)
+            print(f"    Slot {target_slot}: '{channel.name}' -> {'OK' if result else 'FAIL'}")
+            if result:
+                success += 1
+            else:
+                failed += 1
+            time.sleep(0.05)  # Small delay between write operations
+
+        # Switch to VFO mode at the end to leave radio in clean state
+        self.protocol.switch_to_vfo()
+
+        print(f"Upload complete: {success} succeeded, {failed} failed")
+        return success, failed
+
+    def upload_group(self, group_id: str) -> tuple[int, int]:
+        """Upload a specific group's channels to the radio.
+
+        Returns (success_count, fail_count)
+        """
+        if group_id not in self.groups:
+            return 0, 0
+
+        group = self.groups[group_id]
+        success = 0
+        failed = 0
+
+        group_channels = sorted(
+            self.get_channels_by_group(group_id), key=lambda ch: ch.number
+        )
+
+        for idx, channel in enumerate(group_channels):
+            target_slot = group.base_channel + idx
+            # Clear target slot first
+            self.protocol.clear_memory_channel(target_slot)
+            # Create a copy with the target slot number
+            ch_copy = MemoryChannel(
+                number=target_slot,
+                name=channel.name,
+                rx_frequency=channel.rx_frequency,
+                tx_frequency=channel.tx_frequency,
+                mode=channel.mode,
+                filter_width=channel.filter_width,
+                duplex=channel.duplex,
+                tone_mode=channel.tone_mode,
+                tone_frequency=channel.tone_frequency,
+                dtcs_code=channel.dtcs_code,
+                tuning_step=channel.tuning_step,
+                is_empty=False,
+                group=channel.group,
+            )
+            if self.protocol.write_memory_channel(ch_copy):
+                success += 1
+            else:
+                failed += 1
+
         return success, failed
 
     def download_channel(self, number: int) -> Optional[MemoryChannel]:
@@ -127,6 +264,204 @@ class MemoryManager:
             self.banks[bank_id].channels.remove(channel_number)
             return True
         return False
+
+    # --- Group Management ---
+
+    def create_group(self, group_id: str, base_channel: int) -> bool:
+        """Create a new memory group"""
+        if not group_id or group_id in self.groups:
+            return False
+        if not 0 <= base_channel <= self.MAX_CHANNELS:
+            return False
+        self.groups[group_id] = MemoryGroup(id=group_id, base_channel=base_channel)
+        return True
+
+    def delete_group(self, group_id: str) -> bool:
+        """Delete a memory group and unassign all its channels"""
+        if group_id not in self.groups:
+            return False
+        # Unassign channels from this group
+        for channel in self.channels.values():
+            if channel.group == group_id:
+                channel.group = ""
+        del self.groups[group_id]
+        return True
+
+    def update_group(self, group_id: str, new_base: int) -> bool:
+        """Update the base channel for a group"""
+        if group_id not in self.groups:
+            return False
+        if not 0 <= new_base <= self.MAX_CHANNELS:
+            return False
+        self.groups[group_id].base_channel = new_base
+        return True
+
+    def get_group_ranges(self) -> dict[str, tuple[int, int, int]]:
+        """Calculate the target slot range for each group and ungrouped channels.
+
+        Returns dict mapping group_id (or '_ungrouped') to (base, count, end).
+        """
+        ranges: dict[str, tuple[int, int, int]] = {}
+
+        # Count channels per group
+        group_counts: dict[str, int] = {gid: 0 for gid in self.groups}
+        ungrouped_count = 0
+
+        for ch in self.channels.values():
+            if not ch.is_empty:
+                if ch.group and ch.group in self.groups:
+                    group_counts[ch.group] += 1
+                else:
+                    ungrouped_count += 1
+
+        # Build ranges for groups
+        for gid, group in self.groups.items():
+            count = group_counts[gid]
+            if count > 0:
+                ranges[gid] = (group.base_channel, count, group.base_channel + count - 1)
+
+        # Ungrouped channels start at next multiple of 10 after last group
+        if ungrouped_count > 0:
+            ungrouped_base = self._get_ungrouped_base()
+            ranges["_ungrouped"] = (ungrouped_base, ungrouped_count, ungrouped_base + ungrouped_count - 1)
+
+        return ranges
+
+    def validate_no_overlaps(self) -> tuple[bool, str]:
+        """Check if any group ranges overlap. Returns (valid, error_message)."""
+        ranges = self.get_group_ranges()
+        range_list = list(ranges.items())
+
+        for i, (name1, (base1, count1, end1)) in enumerate(range_list):
+            r1 = set(range(base1, end1 + 1))
+            for name2, (base2, count2, end2) in range_list[i + 1:]:
+                r2 = set(range(base2, end2 + 1))
+                overlap = r1 & r2
+                if overlap:
+                    display1 = "(ungrouped)" if name1 == "_ungrouped" else name1
+                    display2 = "(ungrouped)" if name2 == "_ungrouped" else name2
+                    return False, f"'{display1}' and '{display2}' overlap at slots {sorted(overlap)}"
+
+        return True, ""
+
+    def get_channels_by_group(self, group_id: str) -> list[MemoryChannel]:
+        """Get all non-empty channels assigned to a specific group"""
+        return [
+            ch for ch in self.channels.values()
+            if not ch.is_empty and ch.group == group_id
+        ]
+
+    def get_ungrouped_channels(self) -> list[MemoryChannel]:
+        """Get all non-empty channels not assigned to any group"""
+        return [
+            ch for ch in self.channels.values()
+            if not ch.is_empty and (not ch.group or ch.group not in self.groups)
+        ]
+
+    def _get_ungrouped_base(self) -> int:
+        """Calculate base slot for ungrouped channels.
+
+        Returns the next multiple of 10 after the last group's end position.
+        If no groups exist, returns 1.
+        """
+        if not self.groups:
+            return 1
+
+        # Find the highest end position among all groups
+        max_end = 0
+        for group_id, group in self.groups.items():
+            group_channels = self.get_channels_by_group(group_id)
+            if group_channels:
+                end = group.base_channel + len(group_channels) - 1
+                max_end = max(max_end, end)
+
+        if max_end == 0:
+            return 1
+
+        # Round up to next multiple of 10
+        return ((max_end // 10) + 1) * 10
+
+    def get_channels_grouped(self) -> dict:
+        """Get all channels organized by group with computed target slots.
+
+        Returns dict with:
+        - groups: list of group dicts sorted by base_channel
+        - valid: bool indicating no overlaps
+        - overlap_error: error message if overlaps exist
+        """
+        result_groups = []
+
+        # Get group ranges for computing target slots
+        ranges = self.get_group_ranges()
+
+        # Process each defined group, sorted by base_channel
+        sorted_groups = sorted(self.groups.items(), key=lambda x: x[1].base_channel)
+
+        for group_id, group in sorted_groups:
+            group_channels = sorted(
+                self.get_channels_by_group(group_id), key=lambda ch: ch.number
+            )
+            channels_data = []
+            for idx, ch in enumerate(group_channels):
+                target_slot = group.base_channel + idx
+                channels_data.append({
+                    "current_slot": ch.number,
+                    "target_slot": target_slot,
+                    "name": ch.name,
+                    "rx_freq": ch.rx_frequency / 1_000_000,
+                    "tx_freq": ch.tx_frequency / 1_000_000,
+                    "mode": ch.mode.name,
+                    "filter": ch.filter_width.name,
+                    "duplex": ch.duplex.name,
+                    "tone": ch.tone_mode.name,
+                })
+
+            range_info = ranges.get(group_id)
+            result_groups.append({
+                "id": group_id,
+                "base_channel": group.base_channel,
+                "range_start": range_info[0] if range_info else group.base_channel,
+                "range_end": range_info[2] if range_info else group.base_channel - 1,
+                "channels": channels_data,
+            })
+
+        # Process ungrouped channels
+        ungrouped = sorted(self.get_ungrouped_channels(), key=lambda ch: ch.number)
+        if ungrouped:
+            # Ungrouped channels start at next multiple of 10 after last group
+            ungrouped_base = self._get_ungrouped_base()
+            channels_data = []
+            for idx, ch in enumerate(ungrouped):
+                target_slot = ungrouped_base + idx
+                channels_data.append({
+                    "current_slot": ch.number,
+                    "target_slot": target_slot,
+                    "name": ch.name,
+                    "rx_freq": ch.rx_frequency / 1_000_000,
+                    "tx_freq": ch.tx_frequency / 1_000_000,
+                    "mode": ch.mode.name,
+                    "filter": ch.filter_width.name,
+                    "duplex": ch.duplex.name,
+                    "tone": ch.tone_mode.name,
+                })
+
+            range_info = ranges.get("_ungrouped")
+            result_groups.append({
+                "id": "_unassigned",
+                "base_channel": ungrouped_base,
+                "range_start": range_info[0] if range_info else ungrouped_base,
+                "range_end": range_info[2] if range_info else ungrouped_base - 1,
+                "channels": channels_data,
+            })
+
+        # Check for overlaps
+        valid, error = self.validate_no_overlaps()
+
+        return {
+            "groups": result_groups,
+            "valid": valid,
+            "overlap_error": error if not valid else None,
+        }
 
     def get_channels_by_band(self, band: str) -> list[MemoryChannel]:
         """Get all channels for a specific amateur band"""
@@ -215,15 +550,16 @@ class MemoryManager:
         return success, failed
 
     def export_to_json(self, filepath: Path) -> bool:
-        """Export all channels and banks to JSON file"""
+        """Export all channels, banks, and groups to JSON file"""
         try:
-            data = {
+            data: dict = {
                 "channels": [],
                 "banks": {},
+                "groups": {},
             }
             for channel in self.channels.values():
                 if not channel.is_empty:
-                    data["channels"].append({
+                    ch_data: dict = {
                         "number": channel.number,
                         "name": channel.name,
                         "rx_frequency": channel.rx_frequency,
@@ -235,13 +571,22 @@ class MemoryManager:
                         "tone_frequency": channel.tone_frequency,
                         "dtcs_code": channel.dtcs_code,
                         "tuning_step": channel.tuning_step,
-                    })
+                    }
+                    if channel.group:
+                        ch_data["group"] = channel.group
+                    data["channels"].append(ch_data)
+
             for bank_id, bank in self.banks.items():
                 if bank.channels:
                     data["banks"][bank_id] = {
                         "name": bank.name,
                         "channels": bank.channels,
                     }
+
+            for group_id, group in self.groups.items():
+                data["groups"][group_id] = {
+                    "base_channel": group.base_channel,
+                }
 
             with open(filepath, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
@@ -251,12 +596,17 @@ class MemoryManager:
             return False
 
     def import_from_json(self, filepath: Path) -> tuple[int, int]:
-        """Import channels and banks from JSON file. Returns (success_count, fail_count)"""
+        """Import channels, banks, and groups from JSON file. Returns (success_count, fail_count)"""
         success = 0
         failed = 0
         try:
             with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
+
+            # Import groups first so channel group assignments are valid
+            for group_id, group_data in data.get("groups", {}).items():
+                base_channel = group_data.get("base_channel", 1)
+                self.groups[group_id] = MemoryGroup(id=group_id, base_channel=base_channel)
 
             for ch_data in data.get("channels", []):
                 try:
@@ -273,6 +623,7 @@ class MemoryManager:
                         dtcs_code=ch_data.get("dtcs_code", 23),
                         tuning_step=ch_data.get("tuning_step", 100),
                         is_empty=False,
+                        group=ch_data.get("group", ""),
                     )
                     if self.set_channel(channel):
                         success += 1

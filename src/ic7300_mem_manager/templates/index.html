@@ -181,10 +181,33 @@
             filter: brightness(1.1);
         }
 
+        .btn-warning {
+            background: var(--warning);
+            color: #0f172a;
+        }
+
+        .btn-warning:hover {
+            filter: brightness(1.1);
+        }
+
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.8125rem;
+        }
+
+        .btn-danger {
+            background: var(--error);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            filter: brightness(1.1);
         }
 
         /* Operations Row */
@@ -205,41 +228,73 @@
             min-width: 200px;
         }
 
-        /* Table Section */
-        .table-controls {
+        /* Group Section */
+        .group-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .group-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 16px;
+            padding: 14px 20px;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
             flex-wrap: wrap;
             gap: 12px;
         }
 
-        .filter-group {
+        .group-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .group-title.unassigned {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .group-info {
             display: flex;
+            align-items: center;
             gap: 16px;
-            align-items: center;
+            flex-wrap: wrap;
         }
 
-        .checkbox-label {
+        .group-info label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-right: 6px;
+        }
+
+        .group-info input {
+            width: 70px;
+            padding: 6px 10px;
+            font-size: 0.875rem;
+        }
+
+        .group-range {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            padding: 6px 12px;
+            background: var(--input-bg);
+            border-radius: 6px;
+        }
+
+        .group-actions {
             display: flex;
-            align-items: center;
             gap: 8px;
-            cursor: pointer;
-            font-size: 0.9375rem;
-        }
-
-        .checkbox-label input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            accent-color: var(--accent);
         }
 
         /* Data Table */
         .table-wrapper {
             overflow-x: auto;
-            border-radius: 8px;
-            border: 1px solid var(--border);
         }
 
         table {
@@ -249,8 +304,8 @@
         }
 
         th {
-            background: var(--bg-secondary);
-            padding: 12px 16px;
+            background: var(--bg-card);
+            padding: 10px 12px;
             text-align: left;
             font-weight: 600;
             color: var(--text-secondary);
@@ -263,7 +318,7 @@
         }
 
         td {
-            padding: 8px 16px;
+            padding: 6px 12px;
             border-bottom: 1px solid var(--border);
         }
 
@@ -271,18 +326,10 @@
             background: rgba(79, 140, 255, 0.05);
         }
 
-        tr.empty-row {
-            color: var(--text-secondary);
-        }
-
-        tr.empty-row:hover {
-            background: rgba(79, 140, 255, 0.03);
-        }
-
         /* Editable cells */
         td input, td select {
             width: 100%;
-            padding: 6px 8px;
+            padding: 5px 8px;
             font-size: 0.875rem;
             background: transparent;
             border: 1px solid transparent;
@@ -306,7 +353,37 @@
         .ch-number {
             font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
             font-weight: 600;
+            text-align: center;
+        }
+
+        .ch-current {
+            color: var(--text-secondary);
+        }
+
+        .ch-target {
             color: var(--accent);
+        }
+
+        /* Overlap Warning */
+        .overlap-warning {
+            background: rgba(248, 113, 113, 0.1);
+            border: 1px solid var(--error);
+            color: var(--error);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 0.875rem;
+        }
+
+        /* Upload Warning */
+        .upload-warning {
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid var(--warning);
+            color: var(--warning);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 0.875rem;
         }
 
         /* Import/Export */
@@ -421,6 +498,27 @@
             to { transform: rotate(360deg); }
         }
 
+        /* Create Group Form */
+        .create-group-form {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            padding: 16px 20px;
+            background: var(--bg-card);
+            border-radius: 12px;
+            margin-top: 16px;
+            border: 1px dashed var(--border);
+        }
+
+        /* Empty group message */
+        .empty-group-message {
+            padding: 20px;
+            text-align: center;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .container {
@@ -439,12 +537,13 @@
                 width: 100%;
             }
 
-            .table-wrapper {
-                font-size: 0.8125rem;
+            .group-header {
+                flex-direction: column;
+                align-items: flex-start;
             }
 
             td, th {
-                padding: 8px 10px;
+                padding: 6px 8px;
             }
         }
     </style>
@@ -495,6 +594,9 @@
         <!-- Operations Card -->
         <div class="card">
             <h2>Radio Operations</h2>
+            <div class="upload-warning">
+                <strong>Warning:</strong> Upload will clear ALL memory channels (1-99) on the radio before writing the channels shown below.
+            </div>
             <div class="operations-row">
                 <button class="btn btn-secondary" id="downloadBtn" onclick="downloadChannels()">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -504,62 +606,44 @@
                     </svg>
                     Download All
                 </button>
-                <button class="btn btn-secondary" id="uploadBtn" onclick="uploadChannels()">
+                <button class="btn btn-warning" id="uploadBtn" onclick="uploadChannels()">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                         <polyline points="17 8 12 3 7 8"/>
                         <line x1="12" y1="3" x2="12" y2="15"/>
                     </svg>
-                    Upload All
+                    Upload All (Clears Radio)
                 </button>
                 <div class="operation-status" id="operationStatus">Ready</div>
             </div>
         </div>
 
-        <!-- Memory Channels Card -->
+        <!-- Memory Groups Card -->
         <div class="card">
-            <h2>Memory Channels</h2>
-            <div class="table-controls">
-                <div class="filter-group">
-                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px;">
-                        <label for="bandFilter" style="margin: 0;">Band:</label>
-                        <select id="bandFilter" onchange="refreshTable()" style="width: 100px;">
-                            {% for band in bands %}
-                            <option value="{{ band }}">{{ band }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="showEmpty" checked onchange="refreshTable()">
-                        Show Empty Channels
-                    </label>
-                </div>
-                <button class="btn btn-success" onclick="saveChannels()">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-                        <polyline points="17 21 17 13 7 13 7 21"/>
-                        <polyline points="7 3 7 8 15 8"/>
-                    </svg>
-                    Save Changes
-                </button>
+            <h2>Memory Channels by Group</h2>
+            <div id="overlapWarning" class="overlap-warning" style="display: none;"></div>
+
+            <div id="groupedChannelsContainer">
+                <!-- Groups will be rendered here -->
             </div>
-            <div class="table-wrapper" style="max-height: 500px; overflow-y: auto;">
-                <table id="channelTable">
-                    <thead>
-                        <tr>
-                            <th style="width: 50px;">Ch</th>
-                            <th style="width: 120px;">Name</th>
-                            <th style="width: 130px;">RX Freq (MHz)</th>
-                            <th style="width: 130px;">TX Freq (MHz)</th>
-                            <th style="width: 80px;">Mode</th>
-                            <th style="width: 70px;">Filter</th>
-                            <th style="width: 90px;">Duplex</th>
-                            <th style="width: 70px;">Tone</th>
-                        </tr>
-                    </thead>
-                    <tbody id="channelTableBody">
-                    </tbody>
-                </table>
+
+            <!-- Create New Group Form -->
+            <div class="create-group-form">
+                <div class="form-group">
+                    <label for="newGroupId">New Group Name</label>
+                    <input type="text" id="newGroupId" placeholder="e.g., Contest" style="width: 150px;">
+                </div>
+                <div class="form-group">
+                    <label for="newGroupBase">Base Channel</label>
+                    <input type="number" id="newGroupBase" value="10" min="1" max="99" style="width: 80px;">
+                </div>
+                <button class="btn btn-primary" onclick="createGroup()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/>
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    Create Group
+                </button>
             </div>
         </div>
 
@@ -609,7 +693,7 @@
 
     <script>
         // State
-        let channels = [];
+        let groupedData = { groups: [], valid: true, overlap_error: null };
         let isConnected = false;
 
         // Mode options from server
@@ -620,7 +704,7 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
-            refreshTable();
+            refreshGroupedChannels();
             updateSummary();
             setupDropZone();
         });
@@ -711,7 +795,7 @@
 
             if (result.success) {
                 showToast(result.message, 'success');
-                await refreshTable();
+                await refreshGroupedChannels();
             } else {
                 showToast(result.message, 'error');
             }
@@ -725,8 +809,17 @@
                 return;
             }
 
+            if (!groupedData.valid) {
+                showToast('Cannot upload: ' + groupedData.overlap_error, 'error');
+                return;
+            }
+
+            if (!confirm('This will CLEAR ALL memory channels (1-99) on the radio and write the channels shown. Continue?')) {
+                return;
+            }
+
             const status = document.getElementById('operationStatus');
-            status.innerHTML = '<span class="spinner"></span> Uploading...';
+            status.innerHTML = '<span class="spinner"></span> Clearing & uploading...';
 
             const result = await apiCall('/api/upload', { method: 'POST' });
 
@@ -739,89 +832,313 @@
             status.textContent = 'Ready';
         }
 
-        // Table management
-        async function refreshTable() {
-            const band = document.getElementById('bandFilter').value;
-            const showEmpty = document.getElementById('showEmpty').checked;
+        // Grouped channels management
+        async function refreshGroupedChannels() {
+            groupedData = await apiCall('/api/channels-grouped');
 
-            const result = await apiCall(`/api/channels?band=${band}&show_empty=${showEmpty}`);
-            channels = result.channels;
-            renderTable();
+            // Update overlap warning
+            const warningEl = document.getElementById('overlapWarning');
+            if (!groupedData.valid && groupedData.overlap_error) {
+                warningEl.textContent = 'Warning: ' + groupedData.overlap_error;
+                warningEl.style.display = 'block';
+            } else {
+                warningEl.style.display = 'none';
+            }
+
+            renderGroupedChannels();
             updateSummary();
         }
 
-        function renderTable() {
-            const tbody = document.getElementById('channelTableBody');
-            tbody.innerHTML = '';
+        function renderGroupedChannels() {
+            const container = document.getElementById('groupedChannelsContainer');
+            container.innerHTML = '';
 
-            channels.forEach((ch, index) => {
-                const row = document.createElement('tr');
-                if (ch.is_empty) row.classList.add('empty-row');
+            // Get all group IDs for the dropdown (excluding _unassigned)
+            const groupIds = groupedData.groups
+                .filter(g => g.id !== '_unassigned')
+                .map(g => g.id);
 
-                row.innerHTML = `
-                    <td class="ch-number">${ch.ch}</td>
-                    <td><input type="text" value="${ch.name}" maxlength="10" data-index="${index}" data-field="name"></td>
-                    <td><input type="text" class="freq-input" value="${ch.rx_freq > 0 ? ch.rx_freq.toFixed(6) : ''}" data-index="${index}" data-field="rx_freq"></td>
-                    <td><input type="text" class="freq-input" value="${ch.tx_freq > 0 ? ch.tx_freq.toFixed(6) : ''}" data-index="${index}" data-field="tx_freq"></td>
-                    <td>
-                        <select data-index="${index}" data-field="mode">
-                            <option value=""></option>
-                            ${modes.map(m => `<option value="${m}" ${ch.mode === m ? 'selected' : ''}>${m}</option>`).join('')}
-                        </select>
-                    </td>
-                    <td>
-                        <select data-index="${index}" data-field="filter">
-                            <option value=""></option>
-                            ${filters.map(f => `<option value="${f}" ${ch.filter === f ? 'selected' : ''}>${f}</option>`).join('')}
-                        </select>
-                    </td>
-                    <td>
-                        <select data-index="${index}" data-field="duplex">
-                            <option value=""></option>
-                            ${duplexModes.map(d => `<option value="${d}" ${ch.duplex === d ? 'selected' : ''}>${d}</option>`).join('')}
-                        </select>
-                    </td>
-                    <td>
-                        <select data-index="${index}" data-field="tone">
-                            <option value=""></option>
-                            ${toneModes.map(t => `<option value="${t}" ${ch.tone === t ? 'selected' : ''}>${t}</option>`).join('')}
-                        </select>
-                    </td>
+            groupedData.groups.forEach(group => {
+                const section = document.createElement('div');
+                section.className = 'group-section';
+
+                const isUnassigned = group.id === '_unassigned';
+                const rangeText = group.channels.length > 0
+                    ? `Range: ${group.range_start}-${group.range_end}`
+                    : 'Empty';
+
+                section.innerHTML = `
+                    <div class="group-header">
+                        <span class="group-title ${isUnassigned ? 'unassigned' : ''}">${isUnassigned ? 'Unassigned Channels' : group.id}</span>
+                        <div class="group-info">
+                            ${!isUnassigned ? `
+                                <div>
+                                    <label>Base:</label>
+                                    <input type="number" value="${group.base_channel}" min="1" max="99"
+                                           onchange="updateGroupBase('${group.id}', this.value)">
+                                </div>
+                            ` : ''}
+                            <span class="group-range">${rangeText}</span>
+                            <span class="group-range">${group.channels.length} channel${group.channels.length !== 1 ? 's' : ''}</span>
+                        </div>
+                        <div class="group-actions">
+                            ${!isUnassigned ? `
+                                <button class="btn btn-sm btn-secondary" onclick="addChannelToGroup('${group.id}')">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <line x1="12" y1="5" x2="12" y2="19"/>
+                                        <line x1="5" y1="12" x2="19" y2="12"/>
+                                    </svg>
+                                    Add Channel
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteGroup('${group.id}')">Delete Group</button>
+                            ` : `
+                                <button class="btn btn-sm btn-secondary" onclick="addChannelToGroup('')">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <line x1="12" y1="5" x2="12" y2="19"/>
+                                        <line x1="5" y1="12" x2="19" y2="12"/>
+                                    </svg>
+                                    Add Channel
+                                </button>
+                            `}
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        ${group.channels.length > 0 ? `
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style="width: 50px;">Cur</th>
+                                        <th style="width: 50px;">New</th>
+                                        <th style="width: 120px;">Name</th>
+                                        <th style="width: 130px;">RX Freq (MHz)</th>
+                                        <th style="width: 130px;">TX Freq (MHz)</th>
+                                        <th style="width: 80px;">Mode</th>
+                                        <th style="width: 70px;">Filter</th>
+                                        <th style="width: 90px;">Duplex</th>
+                                        <th style="width: 70px;">Tone</th>
+                                        <th style="width: 100px;">Group</th>
+                                        <th style="width: 60px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${group.channels.map((ch, idx) => renderChannelRow(ch, group.id, groupIds)).join('')}
+                                </tbody>
+                            </table>
+                        ` : `
+                            <div class="empty-group-message">No channels in this group</div>
+                        `}
+                    </div>
                 `;
 
-                // Add change listeners
-                row.querySelectorAll('input, select').forEach(el => {
-                    el.addEventListener('change', handleCellChange);
-                });
+                container.appendChild(section);
+            });
 
-                tbody.appendChild(row);
+            // Add event listeners for all inputs
+            container.querySelectorAll('input, select').forEach(el => {
+                if (el.dataset.field) {
+                    el.addEventListener('change', handleChannelChange);
+                }
             });
         }
 
-        function handleCellChange(e) {
-            const index = parseInt(e.target.dataset.index);
+        function renderChannelRow(channel, groupId, allGroupIds) {
+            return `
+                <tr>
+                    <td class="ch-number ch-current">${channel.current_slot}</td>
+                    <td class="ch-number ch-target">${channel.target_slot}</td>
+                    <td><input type="text" value="${channel.name}" maxlength="10"
+                               data-slot="${channel.current_slot}" data-field="name"></td>
+                    <td><input type="text" class="freq-input" value="${channel.rx_freq.toFixed(6)}"
+                               data-slot="${channel.current_slot}" data-field="rx_freq"></td>
+                    <td><input type="text" class="freq-input" value="${channel.tx_freq.toFixed(6)}"
+                               data-slot="${channel.current_slot}" data-field="tx_freq"></td>
+                    <td>
+                        <select data-slot="${channel.current_slot}" data-field="mode">
+                            ${modes.map(m => `<option value="${m}" ${channel.mode === m ? 'selected' : ''}>${m}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td>
+                        <select data-slot="${channel.current_slot}" data-field="filter">
+                            ${filters.map(f => `<option value="${f}" ${channel.filter === f ? 'selected' : ''}>${f}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td>
+                        <select data-slot="${channel.current_slot}" data-field="duplex">
+                            ${duplexModes.map(d => `<option value="${d}" ${channel.duplex === d ? 'selected' : ''}>${d}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td>
+                        <select data-slot="${channel.current_slot}" data-field="tone">
+                            ${toneModes.map(t => `<option value="${t}" ${channel.tone === t ? 'selected' : ''}>${t}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td>
+                        <select data-slot="${channel.current_slot}" data-field="group">
+                            <option value="" ${groupId === '_unassigned' ? 'selected' : ''}>(none)</option>
+                            ${allGroupIds.map(g => `<option value="${g}" ${(groupId === g) ? 'selected' : ''}>${g}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-danger" onclick="deleteChannel(${channel.current_slot})" title="Delete channel">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }
+
+        async function handleChannelChange(e) {
+            const slot = parseInt(e.target.dataset.slot);
             const field = e.target.dataset.field;
             let value = e.target.value;
 
-            if (field === 'rx_freq' || field === 'tx_freq') {
-                value = parseFloat(value) || 0;
-            }
+            // Get current channel data
+            const result = await apiCall('/api/channels?show_empty=false');
+            const channels = result.channels;
 
-            channels[index][field] = value;
-            channels[index].is_empty = !channels[index].rx_freq && !channels[index].mode;
+            // Find and update the channel
+            const channel = channels.find(ch => ch.ch === slot);
+            if (channel) {
+                if (field === 'rx_freq' || field === 'tx_freq') {
+                    value = parseFloat(value) || 0;
+                }
+                channel[field] = value;
+
+                // Save all channels
+                await apiCall('/api/channels', {
+                    method: 'POST',
+                    body: JSON.stringify({ channels })
+                });
+
+                // Refresh to update target slots if group changed
+                await refreshGroupedChannels();
+            }
         }
 
-        async function saveChannels() {
-            const result = await apiCall('/api/channels', {
-                method: 'POST',
-                body: JSON.stringify({ channels })
+        async function updateGroupBase(groupId, newBase) {
+            const result = await apiCall(`/api/groups/${encodeURIComponent(groupId)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ base_channel: parseInt(newBase) })
             });
 
             if (result.success) {
                 showToast(result.message, 'success');
-                await updateSummary();
+                await refreshGroupedChannels();
             } else {
-                showToast('Failed to save changes', 'error');
+                showToast(result.message, 'error');
+            }
+        }
+
+        async function createGroup() {
+            const idInput = document.getElementById('newGroupId');
+            const baseInput = document.getElementById('newGroupBase');
+            const groupId = idInput.value.trim();
+            const baseChannel = parseInt(baseInput.value) || 10;
+
+            if (!groupId) {
+                showToast('Please enter a group name', 'error');
+                return;
+            }
+
+            const result = await apiCall('/api/groups', {
+                method: 'POST',
+                body: JSON.stringify({ id: groupId, base_channel: baseChannel })
+            });
+
+            if (result.success) {
+                showToast(result.message, 'success');
+                idInput.value = '';
+                await refreshGroupedChannels();
+                // Scroll to the grouped channels section
+                document.getElementById('groupedChannelsContainer').scrollIntoView({ behavior: 'smooth' });
+            } else {
+                showToast(result.message, 'error');
+            }
+        }
+
+        async function deleteGroup(groupId) {
+            if (!confirm(`Delete group "${groupId}"? Channels will become unassigned.`)) {
+                return;
+            }
+
+            const result = await apiCall(`/api/groups/${encodeURIComponent(groupId)}`, {
+                method: 'DELETE'
+            });
+
+            if (result.success) {
+                showToast(result.message, 'success');
+                await refreshGroupedChannels();
+            } else {
+                showToast(result.message, 'error');
+            }
+        }
+
+        async function addChannelToGroup(groupId) {
+            // Get current channels to find first available slot
+            const result = await apiCall('/api/channels?show_empty=true');
+            const channels = result.channels;
+
+            // Find first empty slot
+            const emptyChannel = channels.find(ch => ch.is_empty);
+            if (!emptyChannel) {
+                showToast('No empty channel slots available', 'error');
+                return;
+            }
+
+            // Create a new channel in the empty slot
+            emptyChannel.name = '';
+            emptyChannel.rx_freq = 14.2;  // Default to 20m
+            emptyChannel.tx_freq = 14.2;
+            emptyChannel.mode = 'USB';
+            emptyChannel.filter = 'FIL1';
+            emptyChannel.duplex = 'SIMPLEX';
+            emptyChannel.tone = 'OFF';
+            emptyChannel.group = groupId;
+            emptyChannel.is_empty = false;
+
+            // Save
+            await apiCall('/api/channels', {
+                method: 'POST',
+                body: JSON.stringify({ channels })
+            });
+
+            showToast(`Added channel ${emptyChannel.ch} to ${groupId || 'unassigned'}`, 'success');
+            await refreshGroupedChannels();
+        }
+
+        async function deleteChannel(slot) {
+            if (!confirm(`Delete channel ${slot}?`)) {
+                return;
+            }
+
+            // Get current channels
+            const result = await apiCall('/api/channels?show_empty=true');
+            const channels = result.channels;
+
+            // Find and clear the channel
+            const channel = channels.find(ch => ch.ch === slot);
+            if (channel) {
+                channel.name = '';
+                channel.rx_freq = 0;
+                channel.tx_freq = 0;
+                channel.mode = '';
+                channel.filter = '';
+                channel.duplex = '';
+                channel.tone = '';
+                channel.group = '';
+                channel.is_empty = true;
+
+                // Save
+                await apiCall('/api/channels', {
+                    method: 'POST',
+                    body: JSON.stringify({ channels })
+                });
+
+                showToast(`Deleted channel ${slot}`, 'success');
+                await refreshGroupedChannels();
             }
         }
 
@@ -892,7 +1209,7 @@
 
                 if (result.success) {
                     showToast(result.message, 'success');
-                    await refreshTable();
+                    await refreshGroupedChannels();
                 } else {
                     showToast(result.message, 'error');
                 }
