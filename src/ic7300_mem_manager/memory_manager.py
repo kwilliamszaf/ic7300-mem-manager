@@ -362,15 +362,24 @@ class MemoryManager:
         Note: This preserves existing group assignments if the channel at the same
         slot has matching frequency and name (since the radio doesn't store groups).
         """
+        # First, build a map of existing channels by frequency+name for group preservation
+        existing_groups: dict[tuple[int, str], str] = {}
+        for ch in self.channels.values():
+            if not ch.is_empty and ch.group:
+                key = (ch.rx_frequency, ch.name)
+                existing_groups[key] = ch.group
+
+        # Clear all channels in the download range
+        for i in range(start, end + 1):
+            self.channels[i] = MemoryChannel(number=i)
+
+        # Download from radio
         channels = self.protocol.read_all_memory_channels(start, end, progress_callback)
         for channel in channels:
-            # Preserve group assignment if existing channel matches
-            existing = self.channels.get(channel.number)
-            if existing and not existing.is_empty:
-                # Check if it's essentially the same channel (same freq and name)
-                if (existing.rx_frequency == channel.rx_frequency and
-                    existing.name == channel.name):
-                    channel.group = existing.group
+            # Restore group assignment if channel matches by frequency+name
+            key = (channel.rx_frequency, channel.name)
+            if key in existing_groups:
+                channel.group = existing_groups[key]
             self.channels[channel.number] = channel
         return len(channels)
 
