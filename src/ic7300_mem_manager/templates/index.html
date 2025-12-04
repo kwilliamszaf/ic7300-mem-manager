@@ -942,6 +942,7 @@
         }
 
         function renderChannelRow(channel, groupId, allGroupIds) {
+            const isSplit = channel.duplex === 'SPLIT';
             return `
                 <tr>
                     <td class="ch-number ch-current">${channel.current_slot}</td>
@@ -951,7 +952,8 @@
                     <td><input type="text" class="freq-input" value="${channel.rx_freq.toFixed(6)}"
                                data-slot="${channel.current_slot}" data-field="rx_freq"></td>
                     <td><input type="text" class="freq-input" value="${channel.tx_freq.toFixed(6)}"
-                               data-slot="${channel.current_slot}" data-field="tx_freq"></td>
+                               data-slot="${channel.current_slot}" data-field="tx_freq"
+                               id="tx_freq_${channel.current_slot}" ${!isSplit ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}></td>
                     <td>
                         <select data-slot="${channel.current_slot}" data-field="mode">
                             ${modes.map(m => `<option value="${m}" ${channel.mode === m ? 'selected' : ''}>${m}</option>`).join('')}
@@ -963,7 +965,8 @@
                         </select>
                     </td>
                     <td>
-                        <select data-slot="${channel.current_slot}" data-field="duplex">
+                        <select data-slot="${channel.current_slot}" data-field="duplex"
+                                onchange="handleDuplexChange(this, ${channel.current_slot})">
                             ${duplexModes.map(d => `<option value="${d}" ${channel.duplex === d ? 'selected' : ''}>${d}</option>`).join('')}
                         </select>
                     </td>
@@ -990,6 +993,26 @@
             `;
         }
 
+        function handleDuplexChange(selectEl, slot) {
+            const txInput = document.getElementById(`tx_freq_${slot}`);
+            const rxInput = document.querySelector(`input[data-slot="${slot}"][data-field="rx_freq"]`);
+            if (txInput) {
+                if (selectEl.value === 'SPLIT') {
+                    txInput.disabled = false;
+                    txInput.style.opacity = '1';
+                    txInput.style.cursor = '';
+                } else {
+                    // Copy RX freq to TX freq when not in SPLIT mode
+                    if (rxInput) {
+                        txInput.value = rxInput.value;
+                    }
+                    txInput.disabled = true;
+                    txInput.style.opacity = '0.5';
+                    txInput.style.cursor = 'not-allowed';
+                }
+            }
+        }
+
         async function handleChannelChange(e) {
             const slot = parseInt(e.target.dataset.slot);
             const field = e.target.dataset.field;
@@ -1006,6 +1029,11 @@
                     value = parseFloat(value) || 0;
                 }
                 channel[field] = value;
+
+                // If RX freq changed and duplex is not SPLIT, also update TX freq
+                if (field === 'rx_freq' && channel.duplex !== 'SPLIT') {
+                    channel.tx_freq = value;
+                }
 
                 // Save all channels
                 await apiCall('/api/channels', {

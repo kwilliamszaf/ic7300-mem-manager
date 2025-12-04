@@ -136,6 +136,9 @@ def list_to_channels(channels_data: list[dict], mgr: MemoryManager) -> int:
             filter_width = FilterWidth[filter_str] if filter_str else FilterWidth.FIL1
             duplex_str = str(row.get("duplex", "SIMPLEX")).strip()
             duplex = DuplexMode[duplex_str] if duplex_str else DuplexMode.SIMPLEX
+            # Auto-set SPLIT mode when TX and RX frequencies differ
+            if tx_freq != rx_freq:
+                duplex = DuplexMode.SPLIT
             tone_str = str(row.get("tone", "OFF")).strip()
             tone_mode = ToneMode[tone_str] if tone_str else ToneMode.OFF
             group_str = str(row.get("group", "")).strip()
@@ -552,7 +555,7 @@ def launch():
     """Launch the Flask web interface."""
     print("Starting IC-7300 Memory Manager...")
     print("Open http://127.0.0.1:5000 in your browser")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000, debug=False)
 
 
 if __name__ == "__main__":
