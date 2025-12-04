@@ -825,6 +825,8 @@
 
             if (result.success) {
                 showToast(result.message, 'success');
+                // Refresh to show updated channel slots after reorganization
+                await refreshGroupedChannels();
             } else {
                 showToast(result.message, 'error');
             }
