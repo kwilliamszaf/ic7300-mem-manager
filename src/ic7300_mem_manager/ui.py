@@ -330,6 +330,9 @@ def upload_to_radio():
     try:
         operation_in_progress = "upload"
         success, failed = manager.upload_all_channels()
+        # Auto-save to persist the reorganized channel slots
+        if success > 0:
+            auto_save()
         return jsonify({
             "success": True,
             "uploaded": success,

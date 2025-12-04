@@ -179,8 +179,75 @@ class MemoryManager:
         # Switch back to VFO mode after upload (the 09 command sequence changes radio display)
         self.protocol.switch_to_vfo()
 
+        # Update in-memory channels to reflect the new slot assignments
+        if success > 0:
+            self._reorganize_channels_after_upload()
+
         print(f"Upload complete: {success} succeeded, {failed} failed")
         return success, failed
+
+    def _reorganize_channels_after_upload(self) -> None:
+        """Reorganize in-memory channels to match the uploaded slot assignments.
+
+        After upload, channels are moved to their target slots so the UI shows
+        current and new slot numbers as the same.
+        """
+        # Build new channel mapping based on target slots
+        new_channels: dict[int, MemoryChannel] = {}
+
+        # Initialize all slots as empty
+        for i in range(self.MAX_CHANNELS + 1):
+            new_channels[i] = MemoryChannel(number=i)
+
+        # Place grouped channels at their target slots
+        for group_id, group in self.groups.items():
+            group_channels = sorted(
+                self.get_channels_by_group(group_id), key=lambda ch: ch.number
+            )
+            for idx, channel in enumerate(group_channels):
+                target_slot = group.base_channel + idx
+                if target_slot <= self.MAX_CHANNELS:
+                    new_channels[target_slot] = MemoryChannel(
+                        number=target_slot,
+                        name=channel.name,
+                        rx_frequency=channel.rx_frequency,
+                        tx_frequency=channel.tx_frequency,
+                        mode=channel.mode,
+                        filter_width=channel.filter_width,
+                        duplex=channel.duplex,
+                        tone_mode=channel.tone_mode,
+                        tone_frequency=channel.tone_frequency,
+                        dtcs_code=channel.dtcs_code,
+                        tuning_step=channel.tuning_step,
+                        is_empty=False,
+                        group=channel.group,
+                    )
+
+        # Place ungrouped channels at their target slots
+        ungrouped = sorted(self.get_ungrouped_channels(), key=lambda ch: ch.number)
+        ungrouped_base = self._get_ungrouped_base()
+
+        for idx, channel in enumerate(ungrouped):
+            target_slot = ungrouped_base + idx
+            if target_slot <= self.MAX_CHANNELS:
+                new_channels[target_slot] = MemoryChannel(
+                    number=target_slot,
+                    name=channel.name,
+                    rx_frequency=channel.rx_frequency,
+                    tx_frequency=channel.tx_frequency,
+                    mode=channel.mode,
+                    filter_width=channel.filter_width,
+                    duplex=channel.duplex,
+                    tone_mode=channel.tone_mode,
+                    tone_frequency=channel.tone_frequency,
+                    dtcs_code=channel.dtcs_code,
+                    tuning_step=channel.tuning_step,
+                    is_empty=False,
+                    group=channel.group,
+                )
+
+        # Replace channels with reorganized version
+        self.channels = new_channels
 
     def upload_group(self, group_id: str) -> tuple[int, int]:
         """Upload a specific group's channels to the radio.
