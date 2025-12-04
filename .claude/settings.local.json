@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile:*)",
+      "Bash(python test_civ_write.py:*)",
+      "Bash(.venvScriptspython.exe test_civ_write.py)",
+      "Bash(.venv/Scripts/python.exe test_civ_write.py)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(cmd /c \"taskkill /PID 7164 /F\")",
+      "Bash(cmd /c \"taskkill /PID 7164 /F 2>&1\")",
+      "Bash(powershell -Command \"Stop-Process -Id 7164 -Force\")",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(../.venv/Scripts/python.exe:*)",
+      "Bash(curl:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
