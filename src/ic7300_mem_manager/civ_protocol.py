@@ -468,38 +468,24 @@ class CIVProtocol:
         return response is not None and response.command == CIVResponse.OK
 
     def read_memory_channel(self, channel: int) -> Optional[MemoryChannel]:
-        """Read a memory channel from the radio"""
-        # First select the memory channel
-        if not self.select_memory_channel(channel):
+        """Read a memory channel from the radio using command 1A 00.
+
+        This method reads memory channel content directly without selecting
+        the channel on the radio, so it doesn't change the radio's display.
+
+        CI-V command 1A 00 returns the full channel data structure:
+        - Bytes 0: sub-command (0x00)
+        - Bytes 1-2: Memory channel number (BCD)
+        - Byte 3: Split and Select memory setting
+        - Bytes 4-8: Operating frequency (5 bytes BCD)
+        - Bytes 9-10: Operating mode and filter
+        - Byte 11: Data mode and tone type
+        - Bytes 12-14: Repeater tone frequency
+        - Bytes 15-17: Tone squelch frequency
+        - Bytes 18+: Memory name (up to 10 characters)
+        """
+        if not self.serial:
             return None
-
-        # Switch to memory mode to read the channel
-        # Command 0x08 with no data switches to memory mode
-        msg = CIVMessage(
-            destination=self.config.civ_address,
-            source=self.config.controller_address,
-            command=CIVCommand.SELECT_MEMORY,
-        )
-        self.send_command(msg)
-
-        # Small delay for radio to switch
-        time.sleep(0.05)
-
-        # Read the frequency
-        frequency = self.read_frequency()
-        if frequency is None:
-            return None
-
-        # Read the mode
-        mode_result = self.read_mode()
-        if mode_result is None:
-            return None
-
-        mode, filter_width = mode_result
-
-        # Read memory name using command 1A 00 with 2-byte BCD channel number
-        # Format: 1A 00 <high_bcd> <low_bcd> where channel 1 = 00 01
-        name = ""
 
         # Channel number as 2-byte BCD (00 01 to 00 99)
         ch_high = 0x00  # Always 0 for channels 0-99
@@ -514,67 +500,95 @@ class CIVProtocol:
             CIV_EOM
         ])
 
-        if self.serial:
-            self.serial.reset_input_buffer()
-            self.serial.write(raw_cmd)
-            self.serial.flush()
-            time.sleep(0.15)
+        print(f"DEBUG read_memory_channel({channel}): Using 1A 00 command (no channel select)")
+        self.serial.reset_input_buffer()
+        self.serial.write(raw_cmd)
+        self.serial.flush()
+        time.sleep(0.15)
 
-            # Read response
-            buffer = bytearray()
-            start_time = time.time()
-            while time.time() - start_time < 1.0:
-                if self.serial.in_waiting > 0:
-                    buffer.extend(self.serial.read(self.serial.in_waiting))
-                    if buffer.count(CIV_EOM) >= 2:
-                        break
-                time.sleep(0.01)
+        # Read response
+        buffer = bytearray()
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            if self.serial.in_waiting > 0:
+                buffer.extend(self.serial.read(self.serial.in_waiting))
+                if buffer.count(CIV_EOM) >= 2:
+                    break
+            time.sleep(0.01)
 
-            # Find the response (skip echo)
-            first_fd = buffer.find(CIV_EOM)
-            if first_fd >= 0 and first_fd + 1 < len(buffer):
-                response_part = buffer[first_fd + 1:]
+        # Find the response (skip echo)
+        first_fd = buffer.find(CIV_EOM)
+        if first_fd < 0 or first_fd + 1 >= len(buffer):
+            return None
 
-                for i in range(len(response_part) - 6):
-                    if (response_part[i] == CIV_PREAMBLE and
-                        response_part[i+1] == CIV_PREAMBLE):
-                        cmd_byte = response_part[i+4]
-                        end_idx = response_part.find(CIV_EOM, i)
+        response_part = buffer[first_fd + 1:]
 
-                        # Check for error response (FA = NG)
-                        if cmd_byte == 0xFA:
-                            break
+        for i in range(len(response_part) - 6):
+            if (response_part[i] == CIV_PREAMBLE and
+                response_part[i+1] == CIV_PREAMBLE):
+                cmd_byte = response_part[i+4]
+                end_idx = response_part.find(CIV_EOM, i)
 
-                        # Check for valid 1A response
-                        if cmd_byte == 0x1A and end_idx > i:
-                            payload = response_part[i+5:end_idx]
+                # Check for error response (FA = NG) - channel is empty
+                if cmd_byte == 0xFA:
+                    return None
 
-                            # Payload structure after 1A 00 (42 bytes total):
-                            # 00: sub-command (0x00)
-                            # 01-02: channel number (2 bytes BCD)
-                            # 03-31: frequency, mode, tone data (~29 bytes)
-                            # 32-41: memory name (10 characters ASCII)
-                            #
-                            # The name is the last 10 bytes of the payload
+                # Check for valid 1A response
+                if cmd_byte == 0x1A and end_idx > i:
+                    payload = response_part[i+5:end_idx]
 
-                            if len(payload) >= 10:
-                                # Name is the last 10 bytes
-                                name_bytes = payload[-10:]
-                                try:
-                                    name = bytes(name_bytes).decode("ascii").strip("\x00").strip()
-                                except (UnicodeDecodeError, ValueError):
-                                    name = ""
-                        break
+                    # Payload structure after 1A command:
+                    # 00: sub-command (0x00)
+                    # 01-02: channel number (2 bytes BCD)
+                    # 03: Split/select setting
+                    # 04-08: Operating frequency (5 bytes BCD)
+                    # 09-10: Operating mode and filter
+                    # 11: Data mode and tone type
+                    # 12-14: Repeater tone freq
+                    # 15-17: Tone squelch freq
+                    # 18+: Memory name (up to 10 characters)
 
-        return MemoryChannel(
-            number=channel,
-            name=name,
-            rx_frequency=frequency,
-            tx_frequency=frequency,
-            mode=mode,
-            filter_width=filter_width,
-            is_empty=False,
-        )
+                    if len(payload) < 18:
+                        return None
+
+                    # Parse frequency (bytes 4-8 in payload, after sub_cmd + ch_num + split)
+                    freq_bytes = payload[4:9]
+                    frequency = bcd_to_freq(freq_bytes)
+
+                    # Parse mode (byte 9) and filter (byte 10)
+                    mode_byte = payload[9]
+                    filter_byte = payload[10] if len(payload) > 10 else 0x01
+
+                    try:
+                        mode = OperatingMode(mode_byte)
+                    except ValueError:
+                        mode = OperatingMode.USB
+
+                    try:
+                        filter_width = FilterWidth(filter_byte)
+                    except ValueError:
+                        filter_width = FilterWidth.FIL1
+
+                    # Parse name (last 10 bytes)
+                    name = ""
+                    if len(payload) >= 28:
+                        name_bytes = payload[-10:]
+                        try:
+                            name = bytes(name_bytes).decode("ascii").strip("\x00").strip()
+                        except (UnicodeDecodeError, ValueError):
+                            name = ""
+
+                    return MemoryChannel(
+                        number=channel,
+                        name=name,
+                        rx_frequency=frequency,
+                        tx_frequency=frequency,
+                        mode=mode,
+                        filter_width=filter_width,
+                        is_empty=False,
+                    )
+
+        return None
 
     def read_all_memory_channels(
         self, start: int = 1, end: int = 99, progress_callback: Optional[callable] = None
