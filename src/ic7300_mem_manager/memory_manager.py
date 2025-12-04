@@ -192,7 +192,65 @@ class MemoryManager:
         After upload, channels are moved to their target slots so the UI shows
         current and new slot numbers as the same.
         """
-        # Build new channel mapping based on target slots
+        # First, collect all channel data BEFORE modifying anything
+        # This prevents issues with iterating while modifying
+
+        # Collect grouped channels (as copies of data)
+        grouped_data: list[tuple[str, int, list[dict]]] = []
+        for group_id, group in self.groups.items():
+            group_channels = sorted(
+                [ch for ch in self.channels.values()
+                 if not ch.is_empty and ch.group == group_id],
+                key=lambda ch: ch.number
+            )
+            channels_data = []
+            for ch in group_channels:
+                channels_data.append({
+                    "name": ch.name,
+                    "rx_frequency": ch.rx_frequency,
+                    "tx_frequency": ch.tx_frequency,
+                    "mode": ch.mode,
+                    "filter_width": ch.filter_width,
+                    "duplex": ch.duplex,
+                    "tone_mode": ch.tone_mode,
+                    "tone_frequency": ch.tone_frequency,
+                    "dtcs_code": ch.dtcs_code,
+                    "tuning_step": ch.tuning_step,
+                    "group": ch.group,
+                })
+            grouped_data.append((group_id, group.base_channel, channels_data))
+
+        # Collect ungrouped channels (as copies of data)
+        ungrouped_channels = sorted(
+            [ch for ch in self.channels.values()
+             if not ch.is_empty and (not ch.group or ch.group not in self.groups)],
+            key=lambda ch: ch.number
+        )
+        ungrouped_data = []
+        for ch in ungrouped_channels:
+            ungrouped_data.append({
+                "name": ch.name,
+                "rx_frequency": ch.rx_frequency,
+                "tx_frequency": ch.tx_frequency,
+                "mode": ch.mode,
+                "filter_width": ch.filter_width,
+                "duplex": ch.duplex,
+                "tone_mode": ch.tone_mode,
+                "tone_frequency": ch.tone_frequency,
+                "dtcs_code": ch.dtcs_code,
+                "tuning_step": ch.tuning_step,
+                "group": ch.group,
+            })
+
+        # Calculate ungrouped base slot
+        max_group_end = 0
+        for group_id, base_channel, channels_data in grouped_data:
+            if channels_data:
+                end = base_channel + len(channels_data) - 1
+                max_group_end = max(max_group_end, end)
+        ungrouped_base = ((max_group_end // 10) + 1) * 10 if max_group_end > 0 else 1
+
+        # Now build new channel mapping from scratch
         new_channels: dict[int, MemoryChannel] = {}
 
         # Initialize all slots as empty
@@ -200,50 +258,44 @@ class MemoryManager:
             new_channels[i] = MemoryChannel(number=i)
 
         # Place grouped channels at their target slots
-        for group_id, group in self.groups.items():
-            group_channels = sorted(
-                self.get_channels_by_group(group_id), key=lambda ch: ch.number
-            )
-            for idx, channel in enumerate(group_channels):
-                target_slot = group.base_channel + idx
+        for group_id, base_channel, channels_data in grouped_data:
+            for idx, ch_data in enumerate(channels_data):
+                target_slot = base_channel + idx
                 if target_slot <= self.MAX_CHANNELS:
                     new_channels[target_slot] = MemoryChannel(
                         number=target_slot,
-                        name=channel.name,
-                        rx_frequency=channel.rx_frequency,
-                        tx_frequency=channel.tx_frequency,
-                        mode=channel.mode,
-                        filter_width=channel.filter_width,
-                        duplex=channel.duplex,
-                        tone_mode=channel.tone_mode,
-                        tone_frequency=channel.tone_frequency,
-                        dtcs_code=channel.dtcs_code,
-                        tuning_step=channel.tuning_step,
+                        name=ch_data["name"],
+                        rx_frequency=ch_data["rx_frequency"],
+                        tx_frequency=ch_data["tx_frequency"],
+                        mode=ch_data["mode"],
+                        filter_width=ch_data["filter_width"],
+                        duplex=ch_data["duplex"],
+                        tone_mode=ch_data["tone_mode"],
+                        tone_frequency=ch_data["tone_frequency"],
+                        dtcs_code=ch_data["dtcs_code"],
+                        tuning_step=ch_data["tuning_step"],
                         is_empty=False,
-                        group=channel.group,
+                        group=ch_data["group"],
                     )
 
         # Place ungrouped channels at their target slots
-        ungrouped = sorted(self.get_ungrouped_channels(), key=lambda ch: ch.number)
-        ungrouped_base = self._get_ungrouped_base()
-
-        for idx, channel in enumerate(ungrouped):
+        for idx, ch_data in enumerate(ungrouped_data):
             target_slot = ungrouped_base + idx
             if target_slot <= self.MAX_CHANNELS:
                 new_channels[target_slot] = MemoryChannel(
                     number=target_slot,
-                    name=channel.name,
-                    rx_frequency=channel.rx_frequency,
-                    tx_frequency=channel.tx_frequency,
-                    mode=channel.mode,
-                    filter_width=channel.filter_width,
-                    duplex=channel.duplex,
-                    tone_mode=channel.tone_mode,
-                    tone_frequency=channel.tone_frequency,
-                    dtcs_code=channel.dtcs_code,
-                    tuning_step=channel.tuning_step,
+                    name=ch_data["name"],
+                    rx_frequency=ch_data["rx_frequency"],
+                    tx_frequency=ch_data["tx_frequency"],
+                    mode=ch_data["mode"],
+                    filter_width=ch_data["filter_width"],
+                    duplex=ch_data["duplex"],
+                    tone_mode=ch_data["tone_mode"],
+                    tone_frequency=ch_data["tone_frequency"],
+                    dtcs_code=ch_data["dtcs_code"],
+                    tuning_step=ch_data["tuning_step"],
                     is_empty=False,
-                    group=channel.group,
+                    group=ch_data["group"],
                 )
 
         # Replace channels with reorganized version
