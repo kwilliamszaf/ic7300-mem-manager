@@ -119,6 +119,9 @@ class MemoryChannel:
     group: str = ""
     """Memory group assignment (user-defined group ID)"""
 
+    synced_with_radio: bool = False
+    """Whether this channel's slot number is confirmed from the radio"""
+
 
 @dataclass
 class MemoryGroup:

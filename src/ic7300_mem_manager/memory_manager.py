@@ -276,6 +276,7 @@ class MemoryManager:
                         tuning_step=ch_data["tuning_step"],
                         is_empty=False,
                         group=ch_data["group"],
+                        synced_with_radio=True,  # Just uploaded, so synced
                     )
 
         # Place ungrouped channels at their target slots
@@ -296,6 +297,7 @@ class MemoryManager:
                     tuning_step=ch_data["tuning_step"],
                     is_empty=False,
                     group=ch_data["group"],
+                    synced_with_radio=True,  # Just uploaded, so synced
                 )
 
         # Replace channels with reorganized version
@@ -380,6 +382,8 @@ class MemoryManager:
             key = (channel.rx_frequency, channel.name)
             if key in existing_groups:
                 channel.group = existing_groups[key]
+            # Mark as synced since we got this from the radio
+            channel.synced_with_radio = True
             self.channels[channel.number] = channel
         return len(channels)
 
@@ -540,7 +544,8 @@ class MemoryManager:
             for idx, ch in enumerate(group_channels):
                 target_slot = group.base_channel + idx
                 channels_data.append({
-                    "current_slot": ch.number,
+                    "internal_id": ch.number,  # Storage position for editing
+                    "current_slot": ch.number if ch.synced_with_radio else None,
                     "target_slot": target_slot,
                     "name": ch.name,
                     "rx_freq": ch.rx_frequency / 1_000_000,
@@ -569,7 +574,8 @@ class MemoryManager:
             for idx, ch in enumerate(ungrouped):
                 target_slot = ungrouped_base + idx
                 channels_data.append({
-                    "current_slot": ch.number,
+                    "internal_id": ch.number,  # Storage position for editing
+                    "current_slot": ch.number if ch.synced_with_radio else None,
                     "target_slot": target_slot,
                     "name": ch.name,
                     "rx_freq": ch.rx_frequency / 1_000_000,
@@ -744,6 +750,7 @@ class MemoryManager:
                     "tone_frequency": channel.tone_frequency,
                     "dtcs_code": channel.dtcs_code,
                     "tuning_step": channel.tuning_step,
+                    "synced_with_radio": channel.synced_with_radio,
                 }
                 if channel.group:
                     ch_data["group"] = channel.group
@@ -805,6 +812,7 @@ class MemoryManager:
                         tuning_step=ch_data.get("tuning_step", 100),
                         is_empty=False,
                         group=ch_data.get("group", ""),
+                        synced_with_radio=ch_data.get("synced_with_radio", False),
                     )
                     if self.set_channel(channel):
                         success += 1
