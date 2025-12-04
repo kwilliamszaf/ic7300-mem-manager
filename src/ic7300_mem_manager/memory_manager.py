@@ -474,7 +474,7 @@ class MemoryManager:
         return [ch for ch in self.channels.values() if not ch.is_empty and ch.mode == mode]
 
     def export_to_csv(self, filepath: Path) -> bool:
-        """Export all channels to CSV file"""
+        """Export all channels to CSV file, sorted by channel number"""
         try:
             with open(filepath, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
@@ -490,36 +490,57 @@ class MemoryManager:
                     "Tone Freq",
                     "DTCS Code",
                     "Tuning Step",
+                    "Group",
                 ])
-                for channel in self.channels.values():
-                    if not channel.is_empty:
-                        writer.writerow([
-                            channel.number,
-                            channel.name,
-                            channel.rx_frequency,
-                            channel.tx_frequency,
-                            channel.mode.name,
-                            channel.filter_width.name,
-                            channel.duplex.name,
-                            channel.tone_mode.name,
-                            channel.tone_frequency,
-                            channel.dtcs_code,
-                            channel.tuning_step,
-                        ])
+                # Sort channels by number for consistent export order
+                sorted_channels = sorted(
+                    [ch for ch in self.channels.values() if not ch.is_empty],
+                    key=lambda ch: ch.number
+                )
+                for channel in sorted_channels:
+                    writer.writerow([
+                        channel.number,
+                        channel.name,
+                        channel.rx_frequency,
+                        channel.tx_frequency,
+                        channel.mode.name,
+                        channel.filter_width.name,
+                        channel.duplex.name,
+                        channel.tone_mode.name,
+                        channel.tone_frequency,
+                        channel.dtcs_code,
+                        channel.tuning_step,
+                        channel.group,
+                    ])
             return True
         except IOError as e:
             print(f"Failed to export CSV: {e}")
             return False
 
     def import_from_csv(self, filepath: Path) -> tuple[int, int]:
-        """Import channels from CSV file. Returns (success_count, fail_count)"""
+        """Import channels from CSV file. Returns (success_count, fail_count)
+
+        Note: CSV import clears existing channels first and creates groups
+        from unique group names found in the data.
+        """
         success = 0
         failed = 0
         try:
+            # Clear existing channels
+            for i in range(self.MAX_CHANNELS + 1):
+                self.channels[i] = MemoryChannel(number=i)
+
+            # Track unique groups found in CSV
+            found_groups: set[str] = set()
+
             with open(filepath, newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
                     try:
+                        group_name = row.get("Group", "").strip()
+                        if group_name:
+                            found_groups.add(group_name)
+
                         channel = MemoryChannel(
                             number=int(row["Channel"]),
                             name=row.get("Name", ""),
@@ -533,6 +554,7 @@ class MemoryManager:
                             dtcs_code=int(row.get("DTCS Code", 23)),
                             tuning_step=int(row.get("Tuning Step", 100)),
                             is_empty=False,
+                            group=group_name,
                         )
                         if self.set_channel(channel):
                             success += 1
@@ -541,36 +563,52 @@ class MemoryManager:
                     except (KeyError, ValueError) as e:
                         print(f"Failed to parse row: {e}")
                         failed += 1
+
+            # Create groups that don't already exist
+            for group_name in found_groups:
+                if group_name and group_name not in self.groups:
+                    # Find base channel from first channel in this group
+                    for ch in self.channels.values():
+                        if not ch.is_empty and ch.group == group_name:
+                            self.groups[group_name] = MemoryGroup(
+                                id=group_name, base_channel=ch.number
+                            )
+                            break
+
         except IOError as e:
             print(f"Failed to import CSV: {e}")
         return success, failed
 
     def export_to_json(self, filepath: Path) -> bool:
-        """Export all channels, banks, and groups to JSON file"""
+        """Export all channels, banks, and groups to JSON file, sorted by channel number"""
         try:
             data: dict = {
                 "channels": [],
                 "banks": {},
                 "groups": {},
             }
-            for channel in self.channels.values():
-                if not channel.is_empty:
-                    ch_data: dict = {
-                        "number": channel.number,
-                        "name": channel.name,
-                        "rx_frequency": channel.rx_frequency,
-                        "tx_frequency": channel.tx_frequency,
-                        "mode": channel.mode.name,
-                        "filter": channel.filter_width.name,
-                        "duplex": channel.duplex.name,
-                        "tone_mode": channel.tone_mode.name,
-                        "tone_frequency": channel.tone_frequency,
-                        "dtcs_code": channel.dtcs_code,
-                        "tuning_step": channel.tuning_step,
-                    }
-                    if channel.group:
-                        ch_data["group"] = channel.group
-                    data["channels"].append(ch_data)
+            # Sort channels by number for consistent export order
+            sorted_channels = sorted(
+                [ch for ch in self.channels.values() if not ch.is_empty],
+                key=lambda ch: ch.number
+            )
+            for channel in sorted_channels:
+                ch_data: dict = {
+                    "number": channel.number,
+                    "name": channel.name,
+                    "rx_frequency": channel.rx_frequency,
+                    "tx_frequency": channel.tx_frequency,
+                    "mode": channel.mode.name,
+                    "filter": channel.filter_width.name,
+                    "duplex": channel.duplex.name,
+                    "tone_mode": channel.tone_mode.name,
+                    "tone_frequency": channel.tone_frequency,
+                    "dtcs_code": channel.dtcs_code,
+                    "tuning_step": channel.tuning_step,
+                }
+                if channel.group:
+                    ch_data["group"] = channel.group
+                data["channels"].append(ch_data)
 
             for bank_id, bank in self.banks.items():
                 if bank.channels:
@@ -592,14 +630,22 @@ class MemoryManager:
             return False
 
     def import_from_json(self, filepath: Path) -> tuple[int, int]:
-        """Import channels, banks, and groups from JSON file. Returns (success_count, fail_count)"""
+        """Import channels, banks, and groups from JSON file. Returns (success_count, fail_count)
+
+        Note: JSON import clears existing channels and groups first.
+        """
         success = 0
         failed = 0
         try:
             with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
 
-            # Import groups first so channel group assignments are valid
+            # Clear existing channels
+            for i in range(self.MAX_CHANNELS + 1):
+                self.channels[i] = MemoryChannel(number=i)
+
+            # Clear existing groups and import new ones
+            self.groups.clear()
             for group_id, group_data in data.get("groups", {}).items():
                 base_channel = group_data.get("base_channel", 1)
                 self.groups[group_id] = MemoryGroup(id=group_id, base_channel=base_channel)
