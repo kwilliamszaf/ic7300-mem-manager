@@ -485,27 +485,9 @@ def export_csv():
     )
 
 
-@app.route("/api/export/json")
-def export_json():
-    """Export channels as JSON file."""
-    mgr = get_manager()
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-        filepath = Path(f.name)
-
-    mgr.export_to_json(filepath)
-
-    return send_file(
-        filepath,
-        mimetype="application/json",
-        as_attachment=True,
-        download_name="ic7300_channels.json",
-    )
-
-
 @app.route("/api/import", methods=["POST"])
 def import_file():
-    """Import channels from uploaded file."""
+    """Import channels from uploaded CSV file."""
     global manager
 
     if "file" not in request.files:
@@ -524,10 +506,9 @@ def import_file():
 
     if filepath.suffix.lower() == ".csv":
         success, failed = mgr.import_from_csv(filepath)
-    elif filepath.suffix.lower() == ".json":
-        success, failed = mgr.import_from_json(filepath)
     else:
-        return jsonify({"success": False, "message": "Unsupported file format"})
+        filepath.unlink(missing_ok=True)
+        return jsonify({"success": False, "message": "Only CSV files are supported"})
 
     manager = mgr
 
