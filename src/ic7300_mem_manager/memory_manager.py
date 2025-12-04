@@ -98,18 +98,14 @@ class MemoryManager:
             print(f"Upload aborted: {error}")
             return 0, 0
 
-        # Clear ALL memory channels (1-99) first
-        print("Clearing all memory channels...")
+        # Clear ALL memory channels (1-99) first using direct 1A 00 FF command
+        # This does NOT change the radio display
+        print("Clearing all memory channels (background)...")
         for slot in range(1, 100):
             self.protocol.clear_memory_channel(slot)
             if slot % 10 == 0:
                 print(f"  Cleared slots 1-{slot}...")
-            time.sleep(0.05)  # Small delay between clear operations
-
-        # Switch back to VFO mode after clearing (important for first write to work)
-        print("Switching to VFO mode...")
-        self.protocol.switch_to_vfo()
-        time.sleep(0.5)  # Give radio time to settle
+            time.sleep(0.02)  # Small delay between clear operations
 
         success = 0
         failed = 0
@@ -145,7 +141,7 @@ class MemoryManager:
                     success += 1
                 else:
                     failed += 1
-                time.sleep(0.05)  # Small delay between write operations
+                time.sleep(0.02)  # Small delay between write operations
 
         # Write ungrouped channels at next multiple of 10 after last group
         ungrouped = sorted(self.get_ungrouped_channels(), key=lambda ch: ch.number)
@@ -178,9 +174,9 @@ class MemoryManager:
                 success += 1
             else:
                 failed += 1
-            time.sleep(0.05)  # Small delay between write operations
+            time.sleep(0.02)  # Small delay between write operations
 
-        # Switch to VFO mode at the end to leave radio in clean state
+        # Switch back to VFO mode after upload (the 09 command sequence changes radio display)
         self.protocol.switch_to_vfo()
 
         print(f"Upload complete: {success} succeeded, {failed} failed")
