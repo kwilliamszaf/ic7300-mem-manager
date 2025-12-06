@@ -296,16 +296,15 @@ class CIVProtocol:
         return response is not None and response.command == CIVResponse.OK
 
     def write_memory_channel(self, channel: MemoryChannel) -> bool:
-        """Write a memory channel to the radio using the 09 command sequence.
+        """Write a memory channel to the radio.
 
-        The IC-7300 does not support direct memory write via 1A 00 command.
-        Instead, we must use the traditional sequence:
-        1. Switch to VFO mode (07 00)
-        2. Set frequency (05)
-        3. Set mode and filter (06)
-        4. Select memory channel (08)
-        5. Write VFO to memory (09)
-        6. Write memory name using 1A 00 command
+        Uses a two-step process:
+        1. First, use the 09 command sequence to create the basic channel
+           (VFO -> set freq -> set mode -> select memory -> write)
+        2. Then, use the 1A 00 command to write the full channel data including:
+           - TX frequency (for split)
+           - Split flag
+           - Memory name
 
         Note: This WILL briefly change the radio's display during the write.
         """
@@ -367,30 +366,46 @@ class CIVProtocol:
             print(f"DEBUG write_memory_channel({channel.number}): Failed to write memory")
             return False
 
-        # Step 6: Write memory name using 1A 00 command
-        if channel.name:
-            if not self._write_memory_name(channel.number, channel.name):
-                print(f"DEBUG write_memory_channel({channel.number}): Failed to write name")
-                # Don't fail the whole operation, just log the warning
-            else:
-                print(f"DEBUG write_memory_channel({channel.number}): Name '{channel.name}' written")
+        # Step 6: Write full channel data (name, split, TX freq) using 1A 00 command
+        if not self._write_memory_channel_data(channel):
+            print(f"DEBUG write_memory_channel({channel.number}): Failed to write channel data")
+            # Don't fail the whole operation, the basic channel was written
+        else:
+            print(f"DEBUG write_memory_channel({channel.number}): Channel data written")
 
         print(f"DEBUG write_memory_channel({channel.number}): OK")
         return True
 
-    def _write_memory_name(self, channel_num: int, name: str) -> bool:
-        """Write memory channel name using 1A 00 command.
+    def _write_memory_channel_data(self, channel: MemoryChannel) -> bool:
+        """Write full memory channel data using 1A 00 command.
 
-        This reads the current channel data, replaces the name, and writes it back.
-        The name is stored in the last 10 bytes of the channel data structure.
+        This reads the current channel data, modifies it, and writes it back.
+        Handles: name, split flag, TX frequency, TX mode.
+
+        Memory channel payload structure (42 bytes):
+        - Byte 0: Sub-command (0x00)
+        - Bytes 1-2: Channel number (BCD)
+        - Byte 3: Split/Select flag (bit 4 = split enabled)
+        - Bytes 4-8: RX frequency (5 bytes BCD)
+        - Bytes 9-10: RX mode and filter
+        - Byte 11: RX data/tone mode
+        - Bytes 12-14: RX repeater tone
+        - Bytes 15-17: RX TSQL
+        - Bytes 18-22: TX frequency (5 bytes BCD)
+        - Bytes 23-24: TX mode and filter
+        - Byte 25: TX data/tone mode
+        - Bytes 26-28: TX repeater tone
+        - Bytes 29-31: TX TSQL
+        - Bytes 32-41: Name (10 bytes, space-padded)
         """
         if not self.serial:
             return False
 
-        # First, read the current channel data
+        channel_num = channel.number
         ch_high = 0x00
         ch_low = ((channel_num // 10) << 4) | (channel_num % 10)
 
+        # Read current channel data
         read_cmd = bytes([
             CIV_PREAMBLE, CIV_PREAMBLE,
             self.config.civ_address,
@@ -404,7 +419,6 @@ class CIVProtocol:
         self.serial.flush()
         time.sleep(0.15)
 
-        # Read response
         buffer = bytearray()
         start_time = time.time()
         while time.time() - start_time < 1.0:
@@ -429,28 +443,41 @@ class CIVProtocol:
                 response_part[i+4] == 0x1A):
                 end_idx = response_part.find(CIV_EOM, i)
                 if end_idx > i:
-                    payload = bytes(response_part[i+5:end_idx])
+                    payload = bytearray(response_part[i+5:end_idx])
                     break
 
         if payload is None or len(payload) < 42:
             return False
 
-        # Prepare the name (pad to 10 bytes with spaces)
-        name_bytes = name.encode("ascii", errors="replace")[:10].ljust(10, b' ')
+        # Modify the payload
+        # Byte 3: Split flag (bit 4)
+        is_split = channel.duplex == DuplexMode.SPLIT
+        if is_split:
+            payload[3] = payload[3] | 0x10  # Set split bit
+        else:
+            payload[3] = payload[3] & ~0x10  # Clear split bit
 
-        # Build new write payload:
-        # Skip byte 0 (sub-command 00, already in 1A 00)
-        # Keep bytes 1-31 (channel number + data, excluding last 10 name bytes)
-        # Append new name
-        new_payload = bytearray(payload[1:-10]) + bytearray(name_bytes)
+        # Bytes 4-8: RX frequency
+        rx_bcd = freq_to_bcd(channel.rx_frequency)
+        payload[4:9] = rx_bcd
 
-        # Build write command
+        # Bytes 18-22: TX frequency
+        tx_bcd = freq_to_bcd(channel.tx_frequency)
+        payload[18:23] = tx_bcd
+
+        # Last 10 bytes: Name (padded with spaces)
+        name_bytes = channel.name.encode("ascii", errors="replace")[:10].ljust(10, b' ')
+        payload[-10:] = name_bytes
+
+        # Build write command (skip first byte which is sub-command)
+        write_payload = bytes(payload[1:])
+
         write_cmd = bytes([
             CIV_PREAMBLE, CIV_PREAMBLE,
             self.config.civ_address,
             self.config.controller_address,
             0x1A, 0x00
-        ]) + bytes(new_payload) + bytes([CIV_EOM])
+        ]) + write_payload + bytes([CIV_EOM])
 
         self.serial.reset_input_buffer()
         self.serial.write(write_cmd)
@@ -593,23 +620,36 @@ class CIVProtocol:
                 if cmd_byte == 0x1A and end_idx > i:
                     payload = response_part[i+5:end_idx]
 
-                    # Payload structure after 1A command:
+                    # Payload structure after 1A command (42 bytes total):
                     # 00: sub-command (0x00)
                     # 01-02: channel number (2 bytes BCD)
-                    # 03: Split/select setting
-                    # 04-08: Operating frequency (5 bytes BCD)
-                    # 09-10: Operating mode and filter
+                    # 03: Split/select setting (bit 4 = 0x10 = split enabled)
+                    # 04-08: RX frequency (5 bytes BCD)
+                    # 09-10: RX mode and filter
                     # 11: Data mode and tone type
                     # 12-14: Repeater tone freq
                     # 15-17: Tone squelch freq
-                    # 18+: Memory name (up to 10 characters)
+                    # 18-22: TX frequency (5 bytes BCD)
+                    # 23-24: TX mode and filter
+                    # 25: TX Data mode and tone type
+                    # 26-28: TX Repeater tone freq
+                    # 29-31: TX Tone squelch freq
+                    # 32-41: Memory name (10 characters)
 
-                    if len(payload) < 18:
+                    if len(payload) < 32:
                         return None
 
-                    # Parse frequency (bytes 4-8 in payload, after sub_cmd + ch_num + split)
-                    freq_bytes = payload[4:9]
-                    frequency = bcd_to_freq(freq_bytes)
+                    # Parse split flag (byte 3, bit 4)
+                    split_byte = payload[3]
+                    is_split = (split_byte & 0x10) != 0
+
+                    # Parse RX frequency (bytes 4-8)
+                    rx_freq_bytes = payload[4:9]
+                    rx_frequency = bcd_to_freq(rx_freq_bytes)
+
+                    # Parse TX frequency (bytes 18-22)
+                    tx_freq_bytes = payload[18:23]
+                    tx_frequency = bcd_to_freq(tx_freq_bytes)
 
                     # Parse mode (byte 9) and filter (byte 10)
                     mode_byte = payload[9]
@@ -625,9 +665,15 @@ class CIVProtocol:
                     except ValueError:
                         filter_width = FilterWidth.FIL1
 
+                    # Determine duplex mode
+                    if is_split:
+                        duplex = DuplexMode.SPLIT
+                    else:
+                        duplex = DuplexMode.SIMPLEX
+
                     # Parse name (last 10 bytes)
                     name = ""
-                    if len(payload) >= 28:
+                    if len(payload) >= 42:
                         name_bytes = payload[-10:]
                         try:
                             name = bytes(name_bytes).decode("ascii").strip("\x00").strip()
@@ -637,10 +683,11 @@ class CIVProtocol:
                     return MemoryChannel(
                         number=channel,
                         name=name,
-                        rx_frequency=frequency,
-                        tx_frequency=frequency,
+                        rx_frequency=rx_frequency,
+                        tx_frequency=tx_frequency,
                         mode=mode,
                         filter_width=filter_width,
+                        duplex=duplex,
                         is_empty=False,
                     )
 
