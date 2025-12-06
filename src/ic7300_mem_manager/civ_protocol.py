@@ -305,6 +305,7 @@ class CIVProtocol:
         3. Set mode and filter (06)
         4. Select memory channel (08)
         5. Write VFO to memory (09)
+        6. Write memory name using 1A 00 command
 
         Note: This WILL briefly change the radio's display during the write.
         """
@@ -366,8 +367,107 @@ class CIVProtocol:
             print(f"DEBUG write_memory_channel({channel.number}): Failed to write memory")
             return False
 
+        # Step 6: Write memory name using 1A 00 command
+        if channel.name:
+            if not self._write_memory_name(channel.number, channel.name):
+                print(f"DEBUG write_memory_channel({channel.number}): Failed to write name")
+                # Don't fail the whole operation, just log the warning
+            else:
+                print(f"DEBUG write_memory_channel({channel.number}): Name '{channel.name}' written")
+
         print(f"DEBUG write_memory_channel({channel.number}): OK")
         return True
+
+    def _write_memory_name(self, channel_num: int, name: str) -> bool:
+        """Write memory channel name using 1A 00 command.
+
+        This reads the current channel data, replaces the name, and writes it back.
+        The name is stored in the last 10 bytes of the channel data structure.
+        """
+        if not self.serial:
+            return False
+
+        # First, read the current channel data
+        ch_high = 0x00
+        ch_low = ((channel_num // 10) << 4) | (channel_num % 10)
+
+        read_cmd = bytes([
+            CIV_PREAMBLE, CIV_PREAMBLE,
+            self.config.civ_address,
+            self.config.controller_address,
+            0x1A, 0x00, ch_high, ch_low,
+            CIV_EOM
+        ])
+
+        self.serial.reset_input_buffer()
+        self.serial.write(read_cmd)
+        self.serial.flush()
+        time.sleep(0.15)
+
+        # Read response
+        buffer = bytearray()
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            if self.serial.in_waiting > 0:
+                buffer.extend(self.serial.read(self.serial.in_waiting))
+                if buffer.count(CIV_EOM) >= 2:
+                    break
+            time.sleep(0.01)
+
+        # Find response payload (skip echo)
+        first_fd = buffer.find(CIV_EOM)
+        if first_fd < 0 or first_fd + 1 >= len(buffer):
+            return False
+
+        response_part = buffer[first_fd + 1:]
+
+        # Find 1A response and extract payload
+        payload = None
+        for i in range(len(response_part) - 6):
+            if (response_part[i] == CIV_PREAMBLE and
+                response_part[i+1] == CIV_PREAMBLE and
+                response_part[i+4] == 0x1A):
+                end_idx = response_part.find(CIV_EOM, i)
+                if end_idx > i:
+                    payload = bytes(response_part[i+5:end_idx])
+                    break
+
+        if payload is None or len(payload) < 42:
+            return False
+
+        # Prepare the name (pad to 10 bytes with spaces)
+        name_bytes = name.encode("ascii", errors="replace")[:10].ljust(10, b' ')
+
+        # Build new write payload:
+        # Skip byte 0 (sub-command 00, already in 1A 00)
+        # Keep bytes 1-31 (channel number + data, excluding last 10 name bytes)
+        # Append new name
+        new_payload = bytearray(payload[1:-10]) + bytearray(name_bytes)
+
+        # Build write command
+        write_cmd = bytes([
+            CIV_PREAMBLE, CIV_PREAMBLE,
+            self.config.civ_address,
+            self.config.controller_address,
+            0x1A, 0x00
+        ]) + bytes(new_payload) + bytes([CIV_EOM])
+
+        self.serial.reset_input_buffer()
+        self.serial.write(write_cmd)
+        self.serial.flush()
+        time.sleep(0.15)
+
+        # Read response and check for OK
+        buffer = bytearray()
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            if self.serial.in_waiting > 0:
+                buffer.extend(self.serial.read(self.serial.in_waiting))
+                if buffer.count(CIV_EOM) >= 2:
+                    break
+            time.sleep(0.01)
+
+        return b'\xfb' in buffer
 
     def clear_memory_channel(self, channel: int) -> bool:
         """Clear/erase a memory channel using command 1A 00 with FF marker.

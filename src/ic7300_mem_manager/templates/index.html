@@ -1101,12 +1101,35 @@
         }
 
         async function addChannelToGroup(groupId) {
-            // Get current channels to find first available slot
+            // Get current channels to find appropriate slot
             const result = await apiCall('/api/channels?show_empty=true');
             const channels = result.channels;
 
-            // Find first empty slot
-            const emptyChannel = channels.find(ch => ch.is_empty);
+            // Find the highest channel number in this group
+            let maxChannelInGroup = 0;
+            if (groupId) {
+                for (const ch of channels) {
+                    if (!ch.is_empty && ch.group === groupId && ch.ch > maxChannelInGroup) {
+                        maxChannelInGroup = ch.ch;
+                    }
+                }
+            }
+
+            // Find first empty slot after the group's last channel
+            // This ensures new channel appears at bottom of group
+            let emptyChannel = null;
+            for (const ch of channels) {
+                if (ch.is_empty && ch.ch > maxChannelInGroup) {
+                    emptyChannel = ch;
+                    break;
+                }
+            }
+
+            // If no slot after group, find any empty slot
+            if (!emptyChannel) {
+                emptyChannel = channels.find(ch => ch.is_empty);
+            }
+
             if (!emptyChannel) {
                 showToast('No empty channel slots available', 'error');
                 return;
