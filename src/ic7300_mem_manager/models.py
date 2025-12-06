@@ -34,9 +34,7 @@ class FilterWidth(IntEnum):
 class DuplexMode(IntEnum):
     """Duplex/split settings"""
     SIMPLEX = 0x00
-    DUP_MINUS = 0x01
-    DUP_PLUS = 0x02
-    SPLIT = 0x03
+    SPLIT = 0x01
 
 
 class ToneMode(IntEnum):

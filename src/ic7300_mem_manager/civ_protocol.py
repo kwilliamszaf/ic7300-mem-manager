@@ -461,9 +461,16 @@ class CIVProtocol:
         rx_bcd = freq_to_bcd(channel.rx_frequency)
         payload[4:9] = rx_bcd
 
+        # Byte 11: RX tone mode (bits 0-1 = tone type: 0=OFF, 1=TONE, 2=TSQL, 3=DTCS)
+        # Preserve other bits (data mode in upper nibble)
+        payload[11] = (payload[11] & 0xFC) | (channel.tone_mode.value & 0x03)
+
         # Bytes 18-22: TX frequency
         tx_bcd = freq_to_bcd(channel.tx_frequency)
         payload[18:23] = tx_bcd
+
+        # Byte 25: TX tone mode (same as RX for simplex)
+        payload[25] = (payload[25] & 0xFC) | (channel.tone_mode.value & 0x03)
 
         # Last 10 bytes: Name (padded with spaces)
         name_bytes = channel.name.encode("ascii", errors="replace")[:10].ljust(10, b' ')
@@ -671,6 +678,17 @@ class CIVProtocol:
                     else:
                         duplex = DuplexMode.SIMPLEX
 
+                    # Parse tone mode from byte 11
+                    # Byte 11 structure: bits 0-1 = tone type (0=OFF, 1=TONE, 2=TSQL, 3=DTCS)
+                    tone_mode = ToneMode.OFF
+                    if len(payload) > 11:
+                        tone_byte = payload[11]
+                        tone_type = tone_byte & 0x03
+                        try:
+                            tone_mode = ToneMode(tone_type)
+                        except ValueError:
+                            tone_mode = ToneMode.OFF
+
                     # Parse name (last 10 bytes)
                     name = ""
                     if len(payload) >= 42:
@@ -688,6 +706,7 @@ class CIVProtocol:
                         mode=mode,
                         filter_width=filter_width,
                         duplex=duplex,
+                        tone_mode=tone_mode,
                         is_empty=False,
                     )
 

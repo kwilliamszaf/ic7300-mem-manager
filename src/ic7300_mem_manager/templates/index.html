@@ -936,6 +936,7 @@
 
         function renderChannelRow(channel, groupId, allGroupIds) {
             const isSplit = channel.duplex === 'SPLIT';
+            const isFM = channel.mode === 'FM' || channel.mode === 'FM_D';
             const currentSlotDisplay = channel.current_slot !== null ? channel.current_slot : '-';
             // Use internal_id for data-slot (storage position for editing)
             const internalId = channel.internal_id;
@@ -951,7 +952,8 @@
                                data-slot="${internalId}" data-field="tx_freq"
                                id="tx_freq_${internalId}" ${!isSplit ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}></td>
                     <td>
-                        <select data-slot="${internalId}" data-field="mode">
+                        <select data-slot="${internalId}" data-field="mode"
+                                onchange="handleModeChange(this, ${internalId})">
                             ${modes.map(m => `<option value="${m}" ${channel.mode === m ? 'selected' : ''}>${m}</option>`).join('')}
                         </select>
                     </td>
@@ -967,8 +969,12 @@
                         </select>
                     </td>
                     <td>
-                        <select data-slot="${internalId}" data-field="tone">
-                            ${toneModes.map(t => `<option value="${t}" ${channel.tone === t ? 'selected' : ''}>${t}</option>`).join('')}
+                        <select data-slot="${internalId}" data-field="tone" id="tone_${internalId}"
+                                ${!isFM ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''}>
+                            ${toneModes.map(t => {
+                                const disabled = !isFM && (t === 'TONE' || t === 'TSQL');
+                                return `<option value="${t}" ${channel.tone === t ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${t}</option>`;
+                            }).join('')}
                         </select>
                     </td>
                     <td>
@@ -1005,6 +1011,38 @@
                     txInput.disabled = true;
                     txInput.style.opacity = '0.5';
                     txInput.style.cursor = 'not-allowed';
+                }
+            }
+        }
+
+        function handleModeChange(selectEl, slot) {
+            const toneSelect = document.getElementById(`tone_${slot}`);
+            if (toneSelect) {
+                const isFM = selectEl.value === 'FM' || selectEl.value === 'FM_D';
+                if (isFM) {
+                    toneSelect.disabled = false;
+                    toneSelect.style.opacity = '1';
+                    toneSelect.style.cursor = '';
+                    // Enable all options
+                    Array.from(toneSelect.options).forEach(opt => {
+                        opt.disabled = false;
+                    });
+                } else {
+                    // Reset to OFF if currently set to TONE or TSQL
+                    if (toneSelect.value === 'TONE' || toneSelect.value === 'TSQL') {
+                        toneSelect.value = 'OFF';
+                        // Trigger change event to save
+                        toneSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    toneSelect.disabled = true;
+                    toneSelect.style.opacity = '0.5';
+                    toneSelect.style.cursor = 'not-allowed';
+                    // Disable TONE and TSQL options
+                    Array.from(toneSelect.options).forEach(opt => {
+                        if (opt.value === 'TONE' || opt.value === 'TSQL') {
+                            opt.disabled = true;
+                        }
+                    });
                 }
             }
         }
