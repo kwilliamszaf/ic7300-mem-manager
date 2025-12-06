@@ -172,25 +172,168 @@ Then open http://127.0.0.1:5000 in your browser.
 
 ## Troubleshooting
 
-### Serial Port Access (Linux)
+### Finding Your Serial Port
 
-Add your user to the `dialout` group:
-```bash
-sudo usermod -a -G dialout $USER
+#### Windows
+
+1. Connect the IC-7300 via USB
+2. Open **Device Manager** (Win+X, then select Device Manager)
+3. Expand **Ports (COM & LPT)**
+4. Look for "Silicon Labs CP210x USB to UART Bridge" or similar
+5. Note the COM port number (e.g., `COM3`, `COM4`)
+
+**List ports from command line:**
+```powershell
+# PowerShell - list all COM ports
+Get-WmiObject Win32_SerialPort | Select-Object DeviceID, Description
+
+# Or using mode command
+mode
 ```
-Log out and back in for changes to take effect.
 
-### Serial Port Access (Windows)
+**Using the port:**
+```bash
+ic7300-mem download --port COM3 --baud 115200
+```
 
-Ensure the correct COM port is selected. Check Device Manager for the IC-7300's virtual serial port.
+#### Linux
+
+1. Connect the IC-7300 via USB
+2. The device typically appears as `/dev/ttyUSB0` or `/dev/ttyACM0`
+
+**List ports from command line:**
+```bash
+# List all serial devices
+ls -la /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
+
+# More detailed information
+dmesg | grep -i tty
+
+# Using pyserial's miniterm to list ports
+python -m serial.tools.list_ports
+```
+
+**Using the port:**
+```bash
+ic7300-mem download --port /dev/ttyUSB0 --baud 115200
+```
+
+#### macOS
+
+1. Connect the IC-7300 via USB
+2. The device typically appears as `/dev/tty.usbserial-*` or `/dev/tty.SLAB_USBtoUART`
+
+**List ports from command line:**
+```bash
+ls /dev/tty.usb* /dev/tty.SLAB*
+```
+
+**Using the port:**
+```bash
+ic7300-mem download --port /dev/tty.usbserial-0001 --baud 115200
+```
+
+---
+
+### Serial Port Permissions
+
+#### Linux - Permission Denied
+
+If you get "Permission denied" when accessing the serial port:
+
+```bash
+# Add your user to the dialout group
+sudo usermod -a -G dialout $USER
+
+# Log out and back in for changes to take effect
+# Or use newgrp to apply immediately (current session only)
+newgrp dialout
+```
+
+Alternatively, set permissions directly (temporary, resets on reboot):
+```bash
+sudo chmod 666 /dev/ttyUSB0
+```
+
+#### Linux - Create udev Rule (Permanent)
+
+Create a udev rule for persistent permissions:
+
+```bash
+# Create the rule file
+sudo tee /etc/udev/rules.d/99-ic7300.rules << 'EOF'
+# ICOM IC-7300 USB Serial
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", MODE="0666", GROUP="dialout"
+EOF
+
+# Reload udev rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+#### Windows - Port in Use
+
+If the port is busy or in use:
+
+1. Close any other programs using the port (logging software, other CAT programs)
+2. Check Task Manager for running processes that might hold the port
+3. Try disconnecting and reconnecting the USB cable
+4. Restart the IC-7300
+
+---
+
+### IC-7300 USB Settings
+
+Ensure the IC-7300's USB settings match your connection parameters:
+
+1. Press **MENU** on the IC-7300
+2. Navigate to **SET** > **Connectors** > **CI-V**
+3. Verify these settings:
+   - **CI-V Baud Rate**: 115200 (or match your `--baud` setting)
+   - **CI-V Address**: 94h (default)
+   - **CI-V Transceive**: ON (recommended)
+   - **CI-V USB Port**: Unlink from [REMOTE]
+   - **CI-V USB Baud Rate**: 115200
+   - **CI-V USB Echo Back**: OFF
+
+---
 
 ### uv Not Found
 
 Ensure uv is in your PATH:
-```bash
-# Check installation
-uv --version
 
-# Reinstall if needed
+**Check installation:**
+```bash
+uv --version
+```
+
+**Reinstall if needed:**
+
+Windows (PowerShell):
+```powershell
+irm https://astral.sh/uv/install.ps1 | iex
+```
+
+Linux/macOS:
+```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+---
+
+### Common Errors
+
+#### "Could not open port"
+- Check that the correct port name is specified
+- Ensure no other program is using the port
+- Verify USB cable is connected
+
+#### "Permission denied" (Linux)
+- Add user to `dialout` group (see above)
+- Check udev rules
+
+#### "Timeout" or "No response"
+- Verify baud rate matches radio settings
+- Check CI-V address (default 0x94)
+- Ensure CI-V USB Echo Back is OFF on the radio
+- Try a shorter USB cable or different USB port
